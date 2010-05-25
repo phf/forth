@@ -14,5 +14,6 @@ port that I could find:
   http://www.lshift.net/blog/2007/10/04/jonesforth-ported-to-powerpc-and-mac-os-x
   http://www.copypastecode.com/14589/
 
-I've checked all of these into github for my own reference, but I am only
-really working on the ARM version for now.
+I've checked all of these into git for my own reference, but the only thing
+that's actually "mine" is the ARM version. I'll decide on a license at some
+point too. :-D
