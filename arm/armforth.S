@@ -10,3 +10,10 @@
 @ R13=SP parameter stack pointer  PSP
 @ R12    return stack pointer     RSP
 @ R11    next instruction pointer NIP
+
+	.text
+	.global	main
+@ should really be _start but can't make that work yet
+main:
+	mov	r0, #0
+	bx	lr
