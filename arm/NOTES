@@ -1,0 +1,15 @@
+================
+Random ARM Notes
+================
+
+- most instructions work on 32 bit words
+
+- r0-r7 unbanked GPRs, r8-r14 banked GPRs, r15 PC
+  - r13 stack SP
+  - r14 link (return address) LR, return using BX LR
+
+- NZCV flags negative, zero, carry, overflow
+
+- conditional execution see A3-4, e.g. EQ=Z set NE=Z clear MI=N set PL=Z clear
+
+- branches B, BEQ, BNE, etc. BL with link register, BX Rn branch and exchange PC=Rn
