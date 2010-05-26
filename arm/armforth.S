@@ -45,8 +45,7 @@ DOCOL:
 
 
 	.text
-	.global	main
-@ should really be _start but can't make that work yet
-main:
+	.global	_start
+_start:
 	mov	r0, #0
-	bx	lr
+	svc     0x900000+1		@ syscall exit
