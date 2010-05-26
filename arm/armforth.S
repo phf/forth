@@ -18,6 +18,10 @@
 @ Notes:
 @
 @ .align for x86 is bytes, for ARM it's powers of two
+@
+@ TODO:
+@
+@ can we use load/store multiple to our advantage?
 
 @ this hack is needed since .set doesn't seem to work?
 #define PSP r13
@@ -369,6 +373,81 @@ code_\label :
 	ldr	r0, [PSP]
 	mvn	r0, r0
 	str	r0, [PSP]
+	NEXT
+
+
+	defcode "EXIT",4,,EXIT
+	POPRSP	NIP
+	NEXT
+
+	defcode "LIT",3,,LIT
+	ldr	SCR, [NIP], #4
+	PUSHPSP	SCR
+	NEXT
+
+	defcode "!",1,,STORE
+	POPPSP	r0		@ address
+	POPPSP	r1		@ value
+	str	r1, [r0]	@ store
+	NEXT
+
+	defcode "@",1,,FETCH
+	POPPSP	r0		@ address
+	ldr	r1, [r0]	@ load
+	PUSHPSP	r1
+	NEXT
+
+	defcode "+!",2,,ADDSTORE
+	POPPSP	r0		@ address
+	POPPSP	r1		@ amount to add
+	ldr	r2, [r0]
+	add	r2, r2, r1
+	str	r2, [r0]
+	NEXT
+
+	defcode "-!",2,,SUBSTORE
+	POPPSP	r0		@ address
+	POPPSP	r1		@ amount to subtract
+	ldr	r2, [r0]
+	sub	r2, r2, r1
+	str	r2, [r0]
+	NEXT
+
+	defcode "C!",2,,STOREBYTE
+	POPPSP	r0		@ address
+	POPPSP	r1		@ value
+	strb	r1, [r0]	@ store
+	NEXT
+
+	defcode "C@",2,,FETCHBYTE
+	POPPSP	r0		@ address
+	ldrb	r1, [r0]	@ load and sign extend
+	PUSHPSP	r1
+	NEXT
+
+	defcode "C@C!",4,,CCOPY
+	ldr	r0, [PSP, #4]	@ source address
+	ldr	r1, [PSP]	@ destination address
+	ldrb	r2, [r0]	@ load
+	strb	r2, [r1]	@ store
+	add	r0, r0, #1	@ increment source
+	add	r1, r1, #1	@ increment destination
+	str	r0, [PSP, #4]	@ update source
+	str	r1, [PSP]	@ update destination
+	NEXT
+
+	defcode "CMOVE",5,,CMOVE
+	POPPSP	r0		@ length
+	POPPSP	r1		@ destination address
+	POPPSP	r2		@ source address
+	cmp	r0, #0
+	ble	1f		@ skip loop for length <= 0
+2:
+	ldrb	r3, [r2], #1	@ load, increment r2
+	strb	r3, [r1], #1	@ store, increment r3
+	subs	r0, r0, #1	@ decrement counter
+	bgt	2b		@ until length = 0
+1:
 	NEXT
 
 
