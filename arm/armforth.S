@@ -5,23 +5,25 @@
 @
 @ Eventually there will be some kind of license here.
 
-@ Register usage (planned):
-@
-@ R13=SP parameter stack pointer  PSP
-@ R12    return stack pointer     RSP
-@ R11    next instruction pointer NIP
-@ R0...  scratch
-
 	.set JONES_VERSION,47
 	.set ARM_VERSION,0
 
-	.set PSP,r13
-	.set RSP,r12
-	.set NIP,r11
+@ Register usage:
+@
+@ R13=SP	parameter stack pointer		PSP
+@ R12		return stack pointer		RSP
+@ R11		next instruction pointer	NIP
+@ R10		scratch				SCR
+
+@ this hack is needed since .set doesn't seem to work?
+#define PSP r13
+#define RSP r12
+#define NIP r11
+#define SCR r10
 
 	.macro NEXT
-	ldr	r0, [NIP], #4		@ load address from NIP, increment NIP
-	bx	r0			@ jump to address
+	ldr	SCR, [NIP], #4		@ load address from NIP, increment NIP
+	bx	SCR			@ jump to address
 	.endm
 
 	.macro PUSHRSP reg
@@ -31,6 +33,15 @@
 	.macro POPRSP reg
 	ldr	\reg, [RSP], #4		@ load register from RSP, increment RSP
 	.endm
+
+
+	.text
+	.align 4
+DOCOL:
+	PUSHRSP	NIP			@ push NIP on return stack
+	add	SCR, SCR, #4		@ we come from NEXT, SCR is the codeword, so
+	mov	NIP, SCR		@ make NIP the first dataword
+	NEXT
 
 
 	.text
