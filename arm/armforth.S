@@ -213,14 +213,14 @@ code_\label :
 	POPPSP	r0
 	POPPSP	r1
 	add	r0, r1, r0
-	PUSHPSP	r1
+	PUSHPSP	r0
 	NEXT
 
 	defcode "-",1,,SUB
 	POPPSP	r0
 	POPPSP	r1
 	sub	r0, r1, r0
-	PUSHPSP	r1
+	PUSHPSP	r0
 	NEXT
 
 	defcode "*",1,,MUL
@@ -230,7 +230,146 @@ code_\label :
 	PUSHPSP	r0
 	NEXT
 
+	@ TODO this is FAKE for now
+	defcode "/MOD",4,,DIVMOD
+	POPPSP	r0
+	POPPSP	r1
+	mov	r0, #3
+	mov	r1, #10
+	PUSHPSP	r0		@ remainder
+	PUSHPSP	r1		@ quotient
+	NEXT
 
+	@ use 1 for true and 0 for false!
+
+	defcode "=",1,,EQU
+	POPPSP	r0
+	POPPSP	r1
+	cmp	r0, r1
+	moveq	r0, #1
+	movne	r0, #0
+	PUSHPSP	r0
+	NEXT
+
+	defcode "<>",2,,NEQU
+	POPPSP	r0
+	POPPSP	r1
+	cmp	r0, r1
+	movne	r0, #1
+	moveq	r0, #0
+	PUSHPSP	r0
+	NEXT
+
+	defcode "<",1,,LT
+	POPPSP	r0
+	POPPSP	r1
+	cmp	r0, r1
+	movlt	r0, #1
+	movge	r0, #0
+	PUSHPSP	r0
+	NEXT
+
+	defcode ">",1,,GT
+	POPPSP	r0
+	POPPSP	r1
+	cmp	r0, r1
+	movgt	r0, #1
+	movle	r0, #0
+	PUSHPSP	r0
+	NEXT
+
+	defcode "<=",2,,LE
+	POPPSP	r0
+	POPPSP	r1
+	cmp	r0, r1
+	movle	r0, #1
+	movge	r0, #0
+	PUSHPSP	r0
+	NEXT
+
+	defcode ">=",2,,GE
+	POPPSP	r0
+	POPPSP	r1
+	cmp	r0, r1
+	movge	r0, #1
+	movlt	r0, #0
+	PUSHPSP	r0
+	NEXT
+
+	defcode "0=",2,,ZEQU
+	POPPSP	r0
+	cmp	r0, #0
+	moveq	r0, #1
+	movne	r0, #0
+	PUSHPSP	r0
+	NEXT
+
+	defcode "0<>",3,,ZNEQU
+	POPPSP	r0
+	cmp	r0, #0
+	movne	r0, #1
+	moveq	r0, #0
+	PUSHPSP	r0
+	NEXT
+
+	defcode "0<",2,,ZLT
+	POPPSP	r0
+	cmp	r0, #0
+	movlt	r0, #1
+	movge	r0, #0
+	PUSHPSP	r0
+	NEXT
+
+	defcode "0>",2,,ZGT
+	POPPSP	r0
+	cmp	r0, #0
+	movgt	r0, #1
+	movle	r0, #0
+	PUSHPSP	r0
+	NEXT
+
+	defcode "0<=",3,,ZLE
+	POPPSP	r0
+	cmp	r0, #0
+	movle	r0, #1
+	movgt	r0, #0
+	PUSHPSP	r0
+	NEXT
+
+	defcode "0>=",3,,ZGE
+	POPPSP	r0
+	cmp	r0, #0
+	movge	r0, #1
+	movlt	r0, #0
+	PUSHPSP	r0
+	NEXT
+
+	defcode "AND",3,,AND
+	POPPSP	r0
+	POPPSP	r1
+	and	r0, r1, r0
+	PUSHPSP	r0
+	NEXT
+
+	defcode "OR",2,,OR
+	POPPSP	r0
+	POPPSP	r1
+	orr	r0, r1, r0
+	PUSHPSP	r0
+	NEXT
+
+	defcode "XOR",3,,XOR
+	POPPSP	r0
+	POPPSP	r1
+	eor	r0, r1, r0
+	PUSHPSP	r0
+	NEXT
+
+	defcode "INVERT",6,,INVERT
+	ldr	r0, [PSP]
+	mvn	r0, r0
+	str	r0, [PSP]
+	NEXT
 
 
 
