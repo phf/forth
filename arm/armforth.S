@@ -724,6 +724,202 @@ _NUMBER:
 	bx	lr
 
 
+	defcode "FIND",4,,FIND
+	POPPSP	r2		@ length
+	POPPSP	r1		@ address
+	bl	_FIND
+	PUSHPSP	r0		@ address of dictionary entry
+	NEXT
+
+_FIND:
+	ldr	r0, =var_LATEST	@ current dictionary pointer
+	ldr	r0, [r0]
+1:
+	cmp	r0, #0		@ NULL?
+	beq	4f		@ end of list!
+
+	ldrb	r3, [r0, #4]	@ r3 = flags+length field
+	and	r3, r3, #(F_HIDDEN|F_LENMASK)
+	cmp	r2, r3		@ length the same?
+	bne	2f		@ nope, skip this one
+
+	@ r2 is passed length, r3 must be equal and can be destroyed
+	mov	r4, r1		@ current char in string A
+	mov	r5, r0
+	add	r5, r5, #5	@ current char in string B
+10:
+	ldrb 	r6, [r4], #1	@ char A, increment
+	ldrb	r7, [r5], #1	@ char B, increment
+	cmp	r6, r7		@ A = B?
+	bne	2f		@ nope
+	subs	r3, r3, #1	@ decrement
+	bgt	10b		@ > 0, keep going
+
+	@ strings are equal, r0 is the correct header pointer
+	bx	lr
+2:
+	ldr	r0, [r0]	@ previous dictionary pointer
+	b	1b		@ try again
+4:
+	bx	lr		@ not found
+
+
+	defcode ">CFA",4,,TCFA
+	POPPSP	r0
+	bl	_TCFA
+	PUSHPSP	r0
+	NEXT
+_TCFA:
+	add	r0, r0, #4		@ skip link pointer
+	ldrb	r1, [r0]		@ load flags+len
+	add	r0, r0, #1		@ skip flags+len bytes
+	and	r1, r1, #F_LENMASK	@ mask out flags
+	add	r0, r0, r1		@ skip name
+	add	r0, r0, #3		@ align to 4-byte boundary
+	and	r0, r0, #~3
+	bx	lr
+
+	defword ">DFA",4,,TDFA
+	.int TCFA		// >CFA		(get code field address)
+	.int INCR4		// 4+		(add 4 to it to get to next word)
+	.int EXIT		// EXIT		(return from FORTH word)
+
+
+	defcode "CREATE",6,,CREATE
+	@ TODO: shouldn't this ensure length > 0?
+	POPPSP	r1		@ length
+	POPPSP	r0		@ address
+
+	ldr	r2, =var_HERE	@ address of HERE
+	ldr	r3, [r2]	@ value of HERE, address of new header
+	ldr	r4, =var_LATEST	@ address of LATEST
+	ldr	r5, [r4]	@ value of LATEST, link pointer
+	str	r3, [r4]	@ update LATEST to refer to new header
+	str	r5, [r3], #4	@ store link pointer in header, increment header
+
+	strb	r1, [r3], #1	@ store length/flags byte, increment header
+
+	@ we don't need the length in r1 anymore now, so we can destroy it
+	@ r4 and r5 are also free again
+1:
+	cmp	r1, #0
+	ldrgtb	r4, [r1], #1	@ get character, increment
+	strgtb	r4, [r3], #1	@ put character, increment header
+	subs	r1, r1, #1	@ decrement length
+	bgt	1b
+
+	add	r3, r3, #3	@ align
+	and	r3, r3, #~3
+
+	str	r3, [r2]	@ update HERE
+	NEXT
+
+
+	defcode ",",1,,COMMA
+	POPPSP	r0
+	bl	_COMMA
+	NEXT
+_COMMA:
+	ldr	r1, =var_HERE	@ address of HERE
+	ldr	r2, [r1]	@ value of HERE
+	str	r0, [r2], #4	@ store code word, increment
+	str	r2, [r1]	@ update HERE
+	bx	lr
+
+
+	defcode "[",1,F_IMMED,LBRAC
+	ldr	r0, =var_STATE	@ address of STATE
+	mov	r1, #0
+	str	r1, [r0]	@ update STATE
+	NEXT
+
+	defcode "]",1,,RBRAC
+	ldr	r0, =var_STATE	@ address of STATE
+	mov	r1, #1
+	str	r1, [r0]	@ update STATE
+	NEXT
+
+
+	defword ":",1,,COLON
+	.int WORD		// Get the name of the new word
+	.int CREATE		// CREATE the dictionary entry / header
+	.int LIT, DOCOL, COMMA	// Append DOCOL  (the codeword).
+	.int LATEST, FETCH, HIDDEN // Make the word hidden (see below for definition).
+	.int RBRAC		// Go into compile mode.
+	.int EXIT		// Return from the function.
+
+	defword ";",1,F_IMMED,SEMICOLON
+	.int LIT, EXIT, COMMA	// Append EXIT (so the word will return).
+	.int LATEST, FETCH, HIDDEN // Toggle hidden flag -- unhide the word (see below for definition).
+	.int LBRAC		// Go back to IMMEDIATE mode.
+	.int EXIT		// Return from the function.
+
+
+	defcode "IMMEDIATE",9,F_IMMED,IMMEDIATE
+	ldr	r0, =var_LATEST		@ address of LATEST
+	ldr	r0, [r0]		@ value of LATEST
+	ldrb	r1, [r0, #4]		@ get length/flag byte
+	eor	r1, r1, #F_IMMED	@ toggle IMMED bit
+	strb	r1, [r0, #4]		@ update length/flag byte
+	NEXT
+
+	defcode "HIDDEN",6,,HIDDEN
+	POPPSP	r0			@ dictionary entry
+	ldrb	r1, [r0, #4]		@ get length/flag byte
+	eor	r1, r1, #F_HIDDEN	@ toggle HIDDEN bit
+	strb	r1, [r0, #4]		@ update length/flag byte
+	NEXT
+
+	defword "HIDE",4,,HIDE
+	.int WORD		// Get the word (after HIDE).
+	.int FIND		// Look up in the dictionary.
+	.int HIDDEN		// Set F_HIDDEN flag.
+	.int EXIT		// Return.
+
+
+	defcode "'",1,,TICK
+	ldr	r0, [NIP], #4	@ load address of next word from NIP, increment NIP to skip it
+	PUSHPSP	r0
+	NEXT
+
+
+	defcode "BRANCH",6,,BRANCH
+	ldr	r0, [NIP]	@ offset to add
+	add	NIP, NIP, r0	@ add it!
+	NEXT
+
+	defcode "0BRANCH",7,,ZBRANCH
+	POPPSP	r0
+	cmp	r0, #0		@ top of stack zero?
+	beq	code_BRANCH	@ yes, do the branch
+	add	NIP, NIP, #4	@ no, skip the offset
+	NEXT
+
+
+	defcode "LITSTRING",9,,LITSTRING
+	ldr	r0, [NIP], #4	@ get length of string, increment
+	PUSHPSP	NIP		@ push address of string
+	PUSHPSP	r0		@ push length of string
+	add	NIP, NIP, r0	@ skip past the string
+	add	NIP, NIP, #3	@ align
+	and	NIP, NIP, #~3
+	NEXT
+
+	defcode "TELL",4,,TELL
+	mov	r0, #1		@ stdout
+	POPPSP	r2		@ length
+	POPPSP	r1		@ address
+	svc	__NR_write
+	NEXT
+
+
+	defword "QUIT",4,,QUIT
+	.int RZ,RSPSTORE	// R0 RSP!, clear the return stack
+	.int INTERPRET		// interpret the next word
+	.int BRANCH,-8		// and loop (indefinitely)
+
+
+
 
 	.set RETURN_STACK_SIZE,8192
 	.set BUFFER_SIZE,4096
