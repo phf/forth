@@ -8,26 +8,73 @@
 	.set JONES_VERSION,47
 	.set ARM_VERSION,0
 
-@ Register usage:
+@ ARM conventions
+@ ===============
 @
-@ R13=SP	parameter stack pointer		PSP
-@ R12		return stack pointer		RSP
-@ R11		next instruction pointer	NIP
-@ R10		scratch				SCR
+@ It's ridicilously complicated to google for decent
+@ information about the exact ABI details for Linux
+@ on ARM. Until proven wrong, I'll assume that even
+@ Linux adheres to the "official" ABI specification.
+@ That one roughly says this:
 @
-@ Notes:
+@ register	aliases		notes
+@
+@ r15		pc		program counter
+@ r14		lr		link register
+@ r13		sp		stack pointer
+@ r12		ip		linker scratch
+@ r11		v8		variable
+@ r10		v7		variable
+@ r9		v6/sb/tr	variable/platform special
+@ r8		v5		variable
+@ r7		v4		variable/EABI special*
+@ r6		v3		variable
+@ r5		v2		variable
+@ r4		v1		variable
+@ r3		a4		argument/scratch
+@ r2		a3		argument/scratch
+@ r1		a2		argument/result/scratch
+@ r0		a1		argument/result/scratch
+@
+@ *ARM Linux EABI uses r7 for the system call number,
+@  making r7 "special" too. :-/
+@ 
+@ Registers v1-v8 and sp are usually callee saved,
+@ except of course if they are "special". Registers
+@ a1-a4 and lr seem to be caller saved.
+@
+@ Register usage
+@ ==============
+@
+@ From the mess above we derive the following register
+@ conventions for FORTH:
+@
+@ register	mnemonic	notes
+@ r13/sp	PSP		parameter stack pointer
+@ r11/v8	RSP		return stack pointer
+@ r10/v7	NIP		next instruction pointer
+@  r8/v5	SCR		scratch used in NEXT/DOCOL
+@				TODO: maybe we don't need this?
+@  r0-r6	-		various temporaries we need
+@
+@ We simply try to stay clear of all the "special" stuff,
+@ which still leaves us with enough room to play.
+@
+@ Notes
+@ =====
 @
 @ .align for x86 is bytes, for ARM it's powers of two
 @
-@ TODO:
+@ TODO
+@ ====
 @
 @ can we use load/store multiple to our advantage?
 
-@ this hack is needed since .set doesn't seem to work?
+@ for some reason .set doesn't seem to work for this
 #define PSP r13
-#define RSP r12
-#define NIP r11
-#define SCR r10
+#define RSP r11
+#define NIP r10
+#define SCR r8
 
 	.macro NEXT
 	ldr	SCR, [NIP], #4		@ load address from NIP, increment NIP
@@ -43,11 +90,11 @@
 	.endm
 
 	.macro PUSHPSP reg
-	str	\reg, [PSP, #-4]!	@ store register into RSP-4, decrement RSP
+	str	\reg, [PSP, #-4]!	@ store register into PSP-4, decrement PSP
 	.endm
 
 	.macro POPPSP reg
-	ldr	\reg, [PSP], #4		@ load register from RSP, increment RSP
+	ldr	\reg, [PSP], #4		@ load register from PSP, increment PSP
 	.endm
 
 
@@ -381,8 +428,8 @@ code_\label :
 	NEXT
 
 	defcode "LIT",3,,LIT
-	ldr	SCR, [NIP], #4
-	PUSHPSP	SCR
+	ldr	r0, [NIP], #4
+	PUSHPSP	r0
 	NEXT
 
 	defcode "!",1,,STORE
@@ -428,10 +475,8 @@ code_\label :
 	defcode "C@C!",4,,CCOPY
 	ldr	r0, [PSP, #4]	@ source address
 	ldr	r1, [PSP]	@ destination address
-	ldrb	r2, [r0]	@ load
-	strb	r2, [r1]	@ store
-	add	r0, r0, #1	@ increment source
-	add	r1, r1, #1	@ increment destination
+	ldrb	r2, [r0], #1	@ load and increment
+	strb	r2, [r1], #1	@ store and increment
 	str	r0, [PSP, #4]	@ update source
 	str	r1, [PSP]	@ update destination
 	NEXT
@@ -440,15 +485,135 @@ code_\label :
 	POPPSP	r0		@ length
 	POPPSP	r1		@ destination address
 	POPPSP	r2		@ source address
-	cmp	r0, #0
-	ble	1f		@ skip loop for length <= 0
-2:
-	ldrb	r3, [r2], #1	@ load, increment r2
-	strb	r3, [r1], #1	@ store, increment r3
-	subs	r0, r0, #1	@ decrement counter
-	bgt	2b		@ until length = 0
-1:
+1:	cmp	r0, #0
+	ldrgtb	r3, [r2], #1	@ load, increment r2
+	strgtb	r3, [r1], #1	@ store, increment r3
+	subgt	r0, r0, #1	@ decrement counter
+	bgt	1b		@ until length = 0
 	NEXT
+
+	.macro defvar name, namelen, flags=0, label, initial=0
+	defcode \name,\namelen,\flags,\label
+	ldr	r0, =var_\name	@ load address
+	ldr	r0, [r0]	@ load value from address
+	PUSHPSP	r0		@ push value
+	NEXT
+	.data
+	.align 2
+var_\name :
+	.int \initial
+	.endm
+
+	defvar "STATE",5,,STATE
+	defvar "HERE",4,,HERE
+	defvar "LATEST",6,,LATEST,name_SYSCALL0 // SYSCALL0 must be last in built-in dictionary
+	defvar "S0",2,,SZ
+	defvar "BASE",4,,BASE,10
+
+#include <asm/unistd.h>
+
+	.macro defconst name, namelen, flags=0, label, value
+	defcode \name,\namelen,\flags,\label
+	ldr	r0, =\value
+	PUSHPSP	r0
+	NEXT
+	.endm
+
+	defconst "VERSION",7,,VERSION,JONES_VERSION
+	defconst "R0",2,,RZ,return_stack_top
+	defconst "DOCOL",5,,__DOCOL,DOCOL
+	defconst "F_IMMED",7,,__F_IMMED,F_IMMED
+	defconst "F_HIDDEN",8,,__F_HIDDEN,F_HIDDEN
+	defconst "F_LENMASK",9,,__F_LENMASK,F_LENMASK
+
+	defconst "SYS_EXIT",8,,SYS_EXIT,__NR_exit
+	defconst "SYS_OPEN",8,,SYS_OPEN,__NR_open
+	defconst "SYS_CLOSE",9,,SYS_CLOSE,__NR_close
+	defconst "SYS_READ",8,,SYS_READ,__NR_read
+	defconst "SYS_WRITE",9,,SYS_WRITE,__NR_write
+	defconst "SYS_CREAT",9,,SYS_CREAT,__NR_creat
+	defconst "SYS_BRK",7,,SYS_BRK,__NR_brk
+
+	defconst "O_RDONLY",8,,__O_RDONLY,0
+	defconst "O_WRONLY",8,,__O_WRONLY,1
+	defconst "O_RDWR",6,,__O_RDWR,2
+	defconst "O_CREAT",7,,__O_CREAT,0100
+	defconst "O_EXCL",6,,__O_EXCL,0200
+	defconst "O_TRUNC",7,,__O_TRUNC,01000
+	defconst "O_APPEND",8,,__O_APPEND,02000
+	defconst "O_NONBLOCK",10,,__O_NONBLOCK,04000
+
+	defcode ">R",2,,TOR
+	POPPSP	r0
+	PUSHRSP	r0
+	NEXT
+
+	defcode "R>",2,,FROMR
+	POPRSP	r0
+	PUSHPSP	r0
+	NEXT
+
+	defcode "RSP@",4,,RSPFETCH
+	PUSHPSP	RSP
+	NEXT
+
+	defcode "RSP!",4,,RSPSTORE
+	POPPSP	RSP
+	NEXT
+
+	defcode "RDROP",5,,RDROP
+	add	RSP, RSP, #4
+	NEXT
+
+	defcode "DSP@",4,,DSPFETCH
+	mov	r0, PSP
+	PUSHPSP	r0
+	NEXT
+
+	defcode "DSP!",4,,DSPSTORE
+	POPPSP	r0
+	mov	PSP, r0
+	NEXT
+
+	defcode "KEY",3,,KEY
+	bl	_KEY			@ return key in r0
+	PUSHPSP	r0
+	NEXT
+_KEY:
+	ldr	r1, =currkey		@ address of currkey
+	ldr	r3, [r1]		@ value of currkey
+	ldr	r2, =bufftop		@ address of bufftop
+	ldr	r4, [r2]		@ value of bufftop
+	cmp	r3, r4
+	bge	1f			@ need more input
+	ldrb	r0, [r3], #1		@ load character and increment currkey
+	str	r3, [r1]
+	bx	lr			@ return
+1:
+	mov	r0, #0			@ stdin
+	ldr	r1, =buffer		@ address of buffer
+	ldr	r2, =currkey		@ address of currkey
+	str	r1, [r2]		@ update currkey
+	mov	r2, #BUFFER_SIZE	@ length
+	svc	__NR_read
+	cmp	r0, #0			@ check result
+	ble	2f			@ error
+	ldr	r1, =buffer		@ address of buffer
+	add	r1, r1, r0		@ add length we read
+	ldr	r2, =bufftop		@ address of bufftop
+	str	r1, [r2]		@ update bufftop
+	b	_KEY
+2:
+	svc	__NR_exit		@ exit
+
+	.data
+	.align 4
+currkey:
+	.int buffer		// Current place in input buffer (next character to read).
+bufftop:
+	.int buffer		// Last valid data in input buffer + 1.
+
+
 
 
 
