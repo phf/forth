@@ -579,7 +579,7 @@ var_\name :
 	bl	_KEY			@ return key in r0
 	PUSHPSP	r0
 	NEXT
-_KEY:
+_KEY:	@ kills r0-r4!
 	ldr	r1, =currkey		@ address of currkey
 	ldr	r3, [r1]		@ value of currkey
 	ldr	r2, =bufftop		@ address of bufftop
@@ -614,7 +614,114 @@ bufftop:
 	.int buffer		// Last valid data in input buffer + 1.
 
 
+	defcode "EMIT",4,,EMIT
+	POPPSP	r0
+	bl	_EMIT
+	NEXT
+_EMIT:
+	ldr	r1, =emit_scratch	@ address of buffer
+	strb	r0, [r1]		@ store byte in buffer
 
+	mov	r0, #1			@ stdout
+	mov	r2, #1			@ length
+	svc	__NR_write
+	bx	lr
+
+	.data			// NB: easier to fit in the .data section
+emit_scratch:
+	.space 1		// scratch used by EMIT
+
+
+	defcode "WORD",4,,WORD
+	bl _WORD
+	PUSHPSP	r0		@ address
+	PUSHPSP	r1		@ length
+	NEXT
+_WORD:
+	PUSHPSP	lr		@ we call _KEY so we need to save lr
+1:
+	bl	_KEY		@ key in r0
+	cmp	r0, #'\\'	@ comment?
+	beq	3f		@ skip comment
+	cmp	r0, #' '	@ space?
+	beq	1b		@ keep looking
+
+	ldr	r5, =word_buffer	@ address
+2:
+	strb	r0, [r5], #1		@ store character, increment pointer
+	bl	_KEY			@ key in r0
+	cmp	r0, #' '		@ space?
+	bne	2b			@ keep looking
+
+	ldr	r0, =word_buffer	@ address
+	sub	r1, r5, r0		@ length
+	POPPSP	lr			@ restore lr
+	bx	lr
+3:
+	bl	_KEY		@ key in r0
+	cmp	r0, #'\n'	@ eof?
+	bne	3b		@ keep looking
+	b	1b
+
+	.data			// NB: easier to fit in the .data section
+word_buffer:
+	.space 32
+
+
+	defcode "NUMBER",6,,NUMBER
+	POPPSP	r3		@ length of string
+	POPPSP	r2		@ address of string
+	bl	_NUMBER
+	PUSHPSP	r0		@ number
+	PUSHPSP	r1		@ # unparsed
+	NEXT
+
+_NUMBER:
+	mov	r0, #0		@ number
+	mov	r1, #0		@ # unparsed
+
+	cmp	r3, #0		@ zero length?
+	beq	5f		@ error!
+
+	ldr	r4, =var_BASE
+	ldr	r4, [r4]	@ get BASE
+
+	ldrb	r5, [r2], #1	@ get character and increment address
+	mov	r6, #0		@ set negative flag false
+	cmp	r5, #'-'	@ leading '-'?
+	bne	2f		@ nope, try to parse as digit
+
+	mov	r6, #1		@ set negative flag true
+	subs	r3, r3, #1	@ decrement length
+	bne	1f		@ >0 so keep going
+
+	mov	r1, #1		@ indicate error
+	bx	lr
+1:
+	mul	r7, r0, r4	@ number = number * BASE
+	mov	r0, r7		@ (need to use another register for mul to avoid warning)
+	ldrb	r5, [r2], #1	@ get character and increment address
+2:
+	subs	r5, r5, #'0'	@ try lower digit bound
+	blt	4f		@ nope, < '0' so we're done
+	cmp	r5, #10		@ try upper digit bound
+	blt	3f		@ yes, we got one!
+	subs	r5, r5, #17	@ try lower char bound (17 is 'A'-'0')
+	blt	4f		@ nope, < 'A' so we're done
+	add	r5, r5, #10	@ adjust for first 10 digit values before 'A'
+3:
+	cmp	r5, r4		@ >= BASE?
+	bge	4f		@ yep, we're done
+
+	@ finally, add new digit to number and loop
+	add	r0, r5
+	subs	r3, r3, #1
+	bne	1b
+4:
+	cmp	r6, #1		@ check negative flag
+	rsbeq	r0, r0, #0	@ yes, negate (r0 = 0 - r0)
+5:
+	bx	lr
 
 
 
