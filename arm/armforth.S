@@ -94,7 +94,7 @@
 
 	.set	stdin,0
 	.set	stdout,1
-	.set	seterr,2
+	.set	stderr,2
 
 	.macro NEXT
 	ldr	T0, [NIP], #4		@ load codeword address from NIP, increment
@@ -638,16 +638,15 @@ bufftop:
 
 
 	defcode "EMIT",4,,EMIT
-	POPPSP	r0
+	POPPSP	T0
 	bl	_EMIT
 	NEXT
 _EMIT:
-	@ EMIT (char: r0) () {}
-	ldr	r1, =emit_scratch	@ address of buffer
-	strb	r0, [r1]		@ store byte in buffer
-
-	mov	r0, #1			@ stdout
-	mov	r2, #1			@ length
+	@ EMIT (char: T0) ()
+	mov	T2, #1			@ length
+	ldr	T1, =emit_scratch	@ buffer
+	strb	T0, [T1]		@ store char in buffer
+	mov	T0, #stdout
 	svc	__NR_write
 	bx	lr
 
@@ -658,34 +657,35 @@ emit_scratch:
 
 	defcode "WORD",4,,WORD
 	bl _WORD
-	PUSHPSP	r0		@ address
-	PUSHPSP	r1		@ length
+	PUSHPSP	T0			@ address
+	PUSHPSP	T1			@ length
 	NEXT
 _WORD:
-	@ WORD () (address: r0, length: r1) {}
-	PUSHPSP	lr		@ we call _KEY so we need to save lr
+	@ WORD () (address: T0, length: T1)
+	stmfd	sp!, {S0,lr}
 1:
-	bl	_KEY		@ key in r0
-	cmp	r0, #'\\'	@ comment?
-	beq	3f		@ skip comment
-	cmp	r0, #' '	@ space?
-	beq	1b		@ keep looking
+	bl	_KEY
+	cmp	T0, #'\\'		@ comment?
+	beq	3f			@ skip comment
+	cmp	T0, #' '		@ space?
+	beq	1b			@ keep looking
 
-	ldr	r5, =word_buffer	@ address
+	ldr	S0, =word_buffer	@ address
 2:
-	strb	r0, [r5], #1		@ store character, increment pointer
-	bl	_KEY			@ key in r0
-	cmp	r0, #' '		@ space?
+	strb	T0, [S0], #1		@ store character, increment pointer
+	bl	_KEY
+	cmp	T0, #' '		@ space?
 	bne	2b			@ keep looking
 
-	ldr	r0, =word_buffer	@ address
-	sub	r1, r5, r0		@ length
-	POPPSP	lr			@ restore lr
+	ldr	T0, =word_buffer	@ address
+	sub	T1, S0, T0		@ length
+
+	ldmfd	sp!, {S0,lr}
 	bx	lr
 3:
-	bl	_KEY		@ key in r0
-	cmp	r0, #'\n'	@ eof?
-	bne	3b		@ keep looking
+	bl	_KEY
+	cmp	T0, #'\n'		@ eol?
+	bne	3b			@ keep looking
 	b	1b
 
 	.data
@@ -938,9 +938,9 @@ _COMMA:
 	NEXT
 
 	defcode "TELL",4,,TELL
-	mov	r0, #1		@ stdout
-	POPPSP	r2		@ length
-	POPPSP	r1		@ address
+	mov	T0, #stdout
+	POPPSP	T2		@ length
+	POPPSP	T1		@ address
 	svc	__NR_write
 	NEXT
 
@@ -1026,12 +1026,12 @@ _COMMA:
 
 6:
 	@ parse error, print context from input buffer
-	mov	r0, #2			@ stderr
+	mov	r0, #stderr
 	ldr	r1, =errmsg		@ address
 	mov	r2, #errmsgend-errmsg	@ length
 	svc	__NR_write
 
-	mov	r0, #2			@ stderr
+	mov	r0, #stderr
 	ldr	r1, =currkey		@ address of currkey
 	ldr	r1, [r1]		@ value of currkey, pointer in buffer
 	ldr	r2, =buffer		@ address of buffer
@@ -1040,7 +1040,7 @@ _COMMA:
 	movgt	r2, #40			@ cap at 40
 	svc	__NR_write
 
-	mov	r0, #2			@ stderr
+	mov	r0, #stderr
 	ldr	r1, =errmsgnl		@ address
 	mov	r2, #1			@ length
 	svc	__NR_write
