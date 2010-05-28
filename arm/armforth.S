@@ -3,19 +3,26 @@
 @ Copyright (c) 2010 by Peter H. Froehlich <phf@acm.org>
 @ All right reserved.
 @
+@ Please read Richard's original version if you want
+@ the whole tutorial about FORTH. I'll just mention
+@ some ARM related stuff here.
+@
 @ Eventually there will be some kind of license here.
 
 	.set JONES_VERSION,47
 	.set ARM_VERSION,0
 
-@ ARM conventions
-@ ===============
+@ ARM ABI conventions
+@ ===================
 @
-@ It's ridicilously complicated to google for decent
-@ information about the exact ABI details for Linux
-@ on ARM. Until proven wrong, I'll assume that even
-@ Linux adheres to the "official" ABI specification.
-@ That one roughly says this:
+@ It's ridiculously complicated to find the exact ABI
+@ details for Linux on ARM. Someone should really sit
+@ down with all the kernel sources, lots of coke, and
+@ then document them all.
+@
+@ Until proven wrong, I'll assume that Linux adheres
+@ to most of the "official" ABI specification, which
+@ roughly states the following:
 @
 @ register	aliases		notes
 @
@@ -39,26 +46,27 @@
 @ *ARM Linux EABI uses r7 for the system call number,
 @  making r7 "special" too. :-/
 @ 
-@ Registers v1-v8 and sp are usually callee saved,
-@ except of course if they are "special". Registers
-@ a1-a4 and lr seem to be caller saved.
+@ Registers v1-v8 and sp are callee-saved, except of
+@ course if they are "special". Registers a1-a4 and lr
+@ seem to be caller-saved by implication.
 @
-@ Register usage
-@ ==============
+@ ARMFORTH conventions
+@ ====================
 @
 @ From the mess above we derive the following register
 @ conventions for FORTH:
 @
 @ register	mnemonic	notes
+@
 @ r13/sp	PSP		parameter stack pointer
 @ r11/v8	RSP		return stack pointer
 @ r10/v7	NIP		next instruction pointer
-@  r8/v5	SCR		scratch used in NEXT/DOCOL
-@				TODO: maybe we don't need this?
-@  r0-r6	-		various temporaries we need
+@ r4-r6,r8	S0-S3		callee saved temporaries
+@  r0-r3	T0-T3		caller saved temporaries
 @
 @ We simply try to stay clear of all the "special" stuff,
-@ which still leaves us with enough room to play.
+@ which still leaves us with enough room to play. The S?
+@ and T? mnemonics are inspired by MIPS of course.
 @
 @ Notes
 @ =====
@@ -71,79 +79,88 @@
 @ can we use load/store multiple to our advantage?
 
 @ for some reason .set doesn't seem to work for this
+
 #define PSP r13
 #define RSP r11
 #define NIP r10
-#define SCR r8
+#define T0  r0
+#define T1  r1
+#define T2  r2
+#define T3  r3
+#define S0  r4
+#define S1  r5
+#define S2  r6
+#define S3  r8
+
+	.set	stdin,0
+	.set	stdout,1
+	.set	seterr,2
 
 	.macro NEXT
-	ldr	SCR, [NIP], #4		@ load address from NIP, increment NIP
-	bx	SCR			@ jump to address
+	ldr	T0, [NIP], #4		@ load codeword address from NIP, increment
+	bx	T0			@ jump to codeword
 	.endm
 
 	.macro PUSHRSP reg
-	str	\reg, [RSP, #-4]!	@ store register into RSP-4, decrement RSP
+	str	\reg, [RSP, #-4]!	@ store register into RSP-4, decrement
 	.endm
 
 	.macro POPRSP reg
-	ldr	\reg, [RSP], #4		@ load register from RSP, increment RSP
+	ldr	\reg, [RSP], #4		@ load register from RSP, increment
 	.endm
 
 	.macro PUSHPSP reg
-	str	\reg, [PSP, #-4]!	@ store register into PSP-4, decrement PSP
+	str	\reg, [PSP, #-4]!	@ store register into PSP-4, decrement
 	.endm
 
 	.macro POPPSP reg
-	ldr	\reg, [PSP], #4		@ load register from PSP, increment PSP
+	ldr	\reg, [PSP], #4		@ load register from PSP, increment
 	.endm
 
 
 	.text
 	.align 2
+	@ We get here only from NEXT, so T0 is guaranteed to be the codeword
+	@ for DOCOL itself.
 DOCOL:
-	PUSHRSP	NIP			@ push NIP on return stack
-	add	SCR, SCR, #4		@ we come from NEXT, SCR is the codeword, so
-	mov	NIP, SCR		@ make NIP the first dataword
+	PUSHRSP	NIP		@ push NIP on return stack
+	add	T0, T0, #4	@ add 4 to codeword to get first dataword
+	mov	NIP, T0		@ make first dataword the NIP
 	NEXT
 
-	.text
-	.global	_start
-_start:
-	mov	r0, #0
-	svc     0x900000+1		@ syscall exit
 
 	.text
-	.globl _fart
-_fart:
-	ldr	r0, =var_S0		@ save initial parameter stack pointer
-	str	PSP, [r0]		@ save initial parameter stack pointer
+	.global _start
+_start:
+	ldr	T0, =var_S0		@ address of var_S0
+	str	PSP, [T0]		@ store initial PSP in var_S0
 	ldr	RSP, =return_stack_top	@ initialize return stack
-@	call set_up_data_segment
+@TODO	call set_up_data_segment
 	ldr	NIP, =cold_start	@ initialize interpreter
-	NEXT				@ RUN! :-D
+	NEXT
 
 	.section .rodata
 cold_start:
 	.int QUIT
 
+
 	.set F_IMMED,0x80
 	.set F_HIDDEN,0x20
 	.set F_LENMASK,0x1f
 
-	// Store the chain of links.
 	.set link,0
 
 	.macro defword name, namelen, flags=0, label
 	.section .rodata
 	.align 2
-	.globl name_\label
+	.global name_\label
 name_\label :
 	.int link
 	.set link,name_\label
 	.byte \flags+\namelen
 	.ascii "\name"
 	.align 	2
-	.globl \label
+	.global \label
 \label :
 	.int DOCOL
 	@ list of word pointers follows
@@ -152,134 +169,136 @@ name_\label :
 	.macro defcode name, namelen, flags=0, label
 	.section .rodata
 	.align 2
-	.globl name_\label
+	.global name_\label
 name_\label :
 	.int link
 	.set link,name_\label
 	.byte \flags+\namelen
 	.ascii "\name"
 	.align 2
-	.globl \label
+	.global \label
 \label :
 	.int code_\label
 	.text
-	@.align 4 @ TODO commented out in original?
-	.globl code_\label
+	.global code_\label
 code_\label :
 	@ assembler code follows
 	.endm
 
+
 	defcode "DROP",4,,DROP
-	add PSP, PSP, #4		@ POPPSP would load the word
+	add PSP, PSP, #4	@ POPPSP would load from memory
 	NEXT
 
 	defcode "SWAP",4,,SWAP
-	POPPSP	r0
-	POPPSP	r1
-	PUSHPSP	r0
-	PUSHPSP	r1
+	POPPSP	T0		@ TODO: avoid unnecessary PSP updates
+	POPPSP	T1
+	PUSHPSP	T0
+	PUSHPSP	T1
 	NEXT
 
 	defcode "DUP",3,,DUP
-	ldr	r0, [PSP]
-	PUSHPSP	r0
+	ldr	T0, [PSP]	@ POPPSP would require two PUSHPSPs
+	PUSHPSP	T0
 	NEXT
 
 	defcode "OVER",4,,OVER
-	ldr	r0, [PSP, #4]
-	PUSHPSP	r0
+	ldr	T0, [PSP, #4]
+	PUSHPSP	T0
 	NEXT
 
 	defcode "ROT",3,,ROT
-	POPPSP	r0
-	POPPSP	r1
-	POPPSP	r2
-	PUSHPSP	r1
-	PUSHPSP	r0
-	PUSHPSP	r2
+	POPPSP	T0		@ TODO: avoid unecessary PSP updates
+	POPPSP	T1
+	POPPSP	T2
+	PUSHPSP	T1
+	PUSHPSP	T0
+	PUSHPSP	T2
 	NEXT
 
 	defcode "-ROT",4,,NROT
-	POPPSP	r0
-	POPPSP	r1
-	POPPSP	r2
-	PUSHPSP	r0
-	PUSHPSP	r2
-	PUSHPSP	r1
+	POPPSP	T0		@ TODO: avoid unecessary PSP updates
+	POPPSP	T1
+	POPPSP	T2
+	PUSHPSP	T0
+	PUSHPSP	T2
+	PUSHPSP	T1
 	NEXT
 
 	defcode "2DROP",5,,TWODROP
-	add PSP, PSP, #8		@ POPPSP would load the word
+	add	PSP, PSP, #8	@ POPPSP would load from memory
 	NEXT
 
 	defcode "2DUP",4,,TWODUP
-	ldr	r0, [PSP]
-	ldr	r1, [PSP, #4]
-	PUSHPSP	r1
-	PUSHPSP	r0
+	ldr	T0, [PSP]	@ POPPSP would require two PUSHPSPs
+	ldr	T1, [PSP, #4]	@ same
+	PUSHPSP	T1
+	PUSHPSP	T0
 	NEXT
 
 	defcode "2SWAP",5,,TWOSWAP
-	POPPSP	r0
-	POPPSP	r1
-	POPPSP	r2
-	POPPSP	r3
-	PUSHPSP	r1
-	PUSHPSP	r0
-	PUSHPSP	r3
-	PUSHPSP	r2
+	POPPSP	T0		@ TODO: avoid unecessary PSP updates
+	POPPSP	T1
+	POPPSP	T2
+	POPPSP	T3
+	PUSHPSP	T1
+	PUSHPSP	T0
+	PUSHPSP	T3
+	PUSHPSP	T2
 	NEXT
 
 	defcode "?DUP",4,,QDUP
-	ldr	r0, [PSP]
-	cmp	r0, #0
-	strne	r0, [PSP, #-4]!		@ look ma, no branch! PUSHPSP wouldn't be conditional
+	ldr	T0, [PSP]	@ POPPSP would require PUSHPSP
+	cmp	T0, #0		@ != 0?
+	strne	T0, [PSP, #-4]!	@ PUSHPSP is not conditional
 	NEXT
 
 	defcode "1+",2,,INCR
-	ldr	r0, [PSP]
-	add	r0, r0, #1
-	str	r0, [PSP]
+	ldr	T0, [PSP]	@ POPPSP would require PUSHPSP
+	add	T0, T0, #1
+	str	T0, [PSP]
 	NEXT
 
 	defcode "1-",2,,DECR
-	ldr	r0, [PSP]
-	sub	r0, r0, #1
-	str	r0, [PSP]
+	ldr	T0, [PSP]	@ POPPSP would require PUSHPSP
+	sub	T0, T0, #1
+	str	T0, [PSP]
 	NEXT
 
 	defcode "4+",2,,INCR4
-	ldr	r0, [PSP]
-	add	r0, r0, #4
-	str	r0, [PSP]
+	ldr	T0, [PSP]	@ POPPSP would require PUSHPSP
+	add	T0, T0, #4
+	str	T0, [PSP]
 	NEXT
 
 	defcode "4-",2,,DECR4
-	ldr	r0, [PSP]
-	sub	r0, r0, #4
-	str	r0, [PSP]
+	ldr	T0, [PSP]	@ POPPSP would require PUSHPSP
+	sub	T0, T0, #4
+	str	T0, [PSP]
 	NEXT
 
 	defcode "+",1,,ADD
-	POPPSP	r0
-	POPPSP	r1
-	add	r0, r1, r0
-	PUSHPSP	r0
+	POPPSP	T0		@ TODO: avoid unecessary PSP updates
+	POPPSP	T1
+	add	T0, T1, T0
+	PUSHPSP	T0
 	NEXT
 
 	defcode "-",1,,SUB
-	POPPSP	r0
-	POPPSP	r1
-	sub	r0, r1, r0
-	PUSHPSP	r0
+	POPPSP	T0		@ TODO: avoid unecessary PSP updates
+	POPPSP	T1
+	sub	T0, T1, T0
+	PUSHPSP	T0
 	NEXT
 
 	defcode "*",1,,MUL
-	POPPSP	r0
-	POPPSP	r1
-	mul	r0, r1, r0
-	PUSHPSP	r0
+	POPPSP	T0		@ TODO: avoid unecessary PSP updates
+	POPPSP	T1
+	mul	T0, T1, T0
+	PUSHPSP	T0
 	NEXT
+
+@ TODO: register names inconsistent from here on out
 
 	@ TODO this is FAKE for now
 	defcode "/MOD",4,,DIVMOD
@@ -575,39 +594,43 @@ var_\name :
 	mov	PSP, r0
 	NEXT
 
+
 	defcode "KEY",3,,KEY
-	bl	_KEY			@ return key in r0
-	PUSHPSP	r0
+	bl	_KEY
+	PUSHPSP	T0
 	NEXT
-_KEY:	@ kills r0-r4!
-	ldr	r1, =currkey		@ address of currkey
-	ldr	r3, [r1]		@ value of currkey
-	ldr	r2, =bufftop		@ address of bufftop
-	ldr	r4, [r2]		@ value of bufftop
-	cmp	r3, r4
-	bge	1f			@ need more input
-	ldrb	r0, [r3], #1		@ load character and increment currkey
-	str	r3, [r1]
+_KEY:
+	@ KEY () (char: T0)
+	stmfd	sp!, {S2,S3}
+3:
+	ldr	S3, =currkey		@ address of currkey
+	ldr	T3, [S3]		@ value of currkey (address in buffer)
+	ldr	S2, =bufftop		@ address of bufftop
+	ldr	T2, [S2]		@ value of bufftop (address in buffer)
+	cmp	T3, T2			@ currkey >= bufftop?
+	bge	1f			@ yes, need more input
+	ldrb	T0, [T3], #1		@ load character and increment currkey
+	str	T3, [S3]		@ update currkey
+
+	ldmfd	sp!, {S2,S3}
 	bx	lr			@ return
 1:
-	mov	r0, #0			@ stdin
-	ldr	r1, =buffer		@ address of buffer
-	ldr	r2, =currkey		@ address of currkey
-	str	r1, [r2]		@ update currkey
-	mov	r2, #BUFFER_SIZE	@ length
+	mov	T0, #stdin
+	ldr	T1, =buffer
+	mov	T2, #BUFFER_SIZE
 	svc	__NR_read
-	cmp	r0, #0			@ check result
-	ble	2f			@ error
-	ldr	r1, =buffer		@ address of buffer
-	add	r1, r1, r0		@ add length we read
-	ldr	r2, =bufftop		@ address of bufftop
-	str	r1, [r2]		@ update bufftop
-	b	_KEY
+	cmp	T0, #0			@ <= 0?
+	ble	2f			@ yes, fatal error
+	ldr	T1, =buffer
+	str	T1, [S3]		@ reset currkey (to beginning of buffer)
+	add	T1, T1, T0
+	str	T1, [S2]		@ update bufftop (with length we read)
+	b	3b			@ try fast path again
 2:
-	svc	__NR_exit		@ exit
+	svc	__NR_exit		@ exit (with error code from NR_read)
 
 	.data
-	.align 4
+	.align 2
 currkey:
 	.int buffer		// Current place in input buffer (next character to read).
 bufftop:
@@ -619,6 +642,7 @@ bufftop:
 	bl	_EMIT
 	NEXT
 _EMIT:
+	@ EMIT (char: r0) () {}
 	ldr	r1, =emit_scratch	@ address of buffer
 	strb	r0, [r1]		@ store byte in buffer
 
@@ -627,9 +651,9 @@ _EMIT:
 	svc	__NR_write
 	bx	lr
 
-	.data			// NB: easier to fit in the .data section
+	.data
 emit_scratch:
-	.space 1		// scratch used by EMIT
+	.space 1
 
 
 	defcode "WORD",4,,WORD
@@ -638,6 +662,7 @@ emit_scratch:
 	PUSHPSP	r1		@ length
 	NEXT
 _WORD:
+	@ WORD () (address: r0, length: r1) {}
 	PUSHPSP	lr		@ we call _KEY so we need to save lr
 1:
 	bl	_KEY		@ key in r0
@@ -663,7 +688,7 @@ _WORD:
 	bne	3b		@ keep looking
 	b	1b
 
-	.data			// NB: easier to fit in the .data section
+	.data
 word_buffer:
 	.space 32
 
@@ -732,6 +757,8 @@ _NUMBER:
 	NEXT
 
 _FIND:
+	stmfd	sp!, {r4, r5, r6, r7}
+
 	ldr	r0, =var_LATEST	@ current dictionary pointer
 	ldr	r0, [r0]
 1:
@@ -756,12 +783,17 @@ _FIND:
 	bgt	10b		@ > 0, keep going
 
 	@ strings are equal, r0 is the correct header pointer
-	bx	lr
+	b	4f
 2:
 	ldr	r0, [r0]	@ previous dictionary pointer
 	b	1b		@ try again
 4:
+        ldmfd   sp!, {r4, r5, r6, r7}
 	bx	lr		@ not found
+
+
+
+
 
 
 	defcode ">CFA",4,,TCFA
@@ -917,6 +949,107 @@ _COMMA:
 	.int RZ,RSPSTORE	// R0 RSP!, clear the return stack
 	.int INTERPRET		// interpret the next word
 	.int BRANCH,-8		// and loop (indefinitely)
+
+
+	@ for x86 the result of WORD fits right into FIND but
+	@ we have
+	@
+	@ FIND(address: r1, length: r2) (address: r0) {saves r4, r5, r6, r7}
+	@ TCFA(address: r0) (address: r0)
+	@ NUMBER(address: r2, length: r3) (number: r0, unparsed: r1)
+	@
+	@ right now making this a bit uglier :-/
+
+
+	defcode "INTERPRET",9,,INTERPRET
+	mov	r7, #0			@ reset interpret_is_lit flag
+
+	bl	_WORD			@ returns r0 = address, r1 = length
+	mov	r6, r1			@ backup of address of string
+	mov	r5, r0			@ backup of length of string
+	mov	r2, r6			@ adjust for FIND call
+	mov	r1, r5
+	bl	_FIND			@ returns r0 = dictionary entry or NULL
+	cmp	r0, #0			@ = NULL?
+	beq	1f			@ not found
+
+	ldrb	r6, [r0, #4]		@ load length/flags byte
+
+
+	// In the dictionary.  Is it an IMMEDIATE codeword?
+	mov %eax,%edi		// %edi = dictionary entry
+	movb 4(%edi),%al	// Get name+flags.
+	push %ax		// Just save it for now.
+	call _TCFA		// Convert dictionary entry (in %edi) to codeword pointer.
+	pop %ax
+	andb $F_IMMED,%al	// Is IMMED flag set?
+	mov %edi,%eax
+	jnz 4f			// If IMMED, jump straight to executing.
+
+	jmp 2f
+
+1:	// Not in the dictionary (not a word) so assume it's a literal number.
+	incl interpret_is_lit
+	call _NUMBER		// Returns the parsed number in %eax, %ecx > 0 if error
+	test %ecx,%ecx
+	jnz 6f
+	mov %eax,%ebx
+	mov $LIT,%eax		// The word is LIT
+
+2:	// Are we compiling or executing?
+	movl var_STATE,%edx
+	test %edx,%edx
+	jz 4f			// Jump if executing.
+
+	// Compiling - just append the word to the current dictionary definition.
+	call _COMMA
+	mov interpret_is_lit,%ecx // Was it a literal?
+	test %ecx,%ecx
+	jz 3f
+	mov %ebx,%eax		// Yes, so LIT is followed by a number.
+	call _COMMA
+3:	NEXT
+
+4:	// Executing - run it!
+	mov interpret_is_lit,%ecx // Literal?
+	test %ecx,%ecx		// Literal?
+	jnz 5f
+
+	// Not a literal, execute it now.  This never returns, but the codeword will
+	// eventually call NEXT which will reenter the loop in QUIT.
+	jmp *(%eax)
+
+5:	// Executing a literal, which means push it on the stack.
+	push %ebx
+	NEXT
+
+
+6:
+	@ parse error, print context from input buffer
+	mov	r0, #2			@ stderr
+	ldr	r1, =errmsg		@ address
+	mov	r2, #errmsgend-errmsg	@ length
+	svc	__NR_write
+
+	mov	r0, #2			@ stderr
+	ldr	r1, =currkey		@ address of currkey
+	ldr	r1, [r1]		@ value of currkey, pointer in buffer
+	ldr	r2, =buffer		@ address of buffer
+	ldr	r2, r1, r2		@ length = currkey - buffer
+	cmp	r2, #40			@ > 40?
+	movgt	r2, #40			@ cap at 40
+	svc	__NR_write
+
+	mov	r0, #2			@ stderr
+	ldr	r1, =errmsgnl		@ address
+	mov	r2, #1			@ length
+	svc	__NR_write
+	NEXT
+
+	.section .rodata
+errmsg: .ascii "PARSE ERROR: "
+errmsgend:
+errmsgnl: .ascii "\n"
 
 
 
