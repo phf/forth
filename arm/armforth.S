@@ -801,48 +801,51 @@ _NUMBER:
 
 
 
+
 	defcode "FIND",4,,FIND
-	POPPSP	r2		@ length
-	POPPSP	r1		@ address
+	POPPSP	T1			@ length of string
+	POPPSP	T0			@ address of string
 	bl	_FIND
-	PUSHPSP	r0		@ address of dictionary entry
+	PUSHPSP	T0			@ address of dictionary entry
 	NEXT
 
 _FIND:
-	stmfd	sp!, {r4, r5, r6, r7}
+	stmfd	sp!, {S0,S1,S2,S3}
 
-	ldr	r0, =var_LATEST	@ current dictionary pointer
-	ldr	r0, [r0]
+	mov	T2, T1			@ length
+	mov	T1, T0			@ address
+	ldr	T0, =var_LATEST
+	ldr	T0, [T0]		@ current dictionary pointer
 1:
-	cmp	r0, #0		@ NULL?
-	beq	4f		@ end of list!
+	cmp	T0, #0			@ NULL?
+	beq	4f			@ end of list!
 
-	ldrb	r3, [r0, #4]	@ r3 = flags+length field
-	and	r3, r3, #(F_HIDDEN|F_LENMASK)
-	cmp	r2, r3		@ length the same?
-	bne	2f		@ nope, skip this one
+	ldrb	T3, [T0, #4]		@ flags+length field
+	and	T3, T3, #(F_HIDDEN|F_LENMASK)
+	cmp	T2, T2			@ length the same?
+	bne	2f			@ nope, skip this entry
 
-	@ r2 is passed length, r3 must be equal and can be destroyed
-	mov	r4, r1		@ current char in string A
-	mov	r5, r0
-	add	r5, r5, #5	@ current char in string B
+	@ T2 = T3, but T3 can be destroyed in the loop
+
+	mov	S0, T1			@ current char in string A
+	mov	S1, T0
+	add	S1, S1, #5		@ current char in string B
 10:
-	ldrb 	r6, [r4], #1	@ char A, increment
-	ldrb	r7, [r5], #1	@ char B, increment
-	cmp	r6, r7		@ A = B?
-	bne	2f		@ nope
-	subs	r3, r3, #1	@ decrement
-	bgt	10b		@ > 0, keep going
+	ldrb 	S2, [S0], #1		@ char A, increment
+	ldrb	S3, [S1], #1		@ char B, increment
+	cmp	S2, S3			@ A = B?
+	bne	2f			@ nope
+	subs	T3, T3, #1		@ decrement
+	bne	10b			@ > 0, keep going
 
-	@ strings are equal, r0 is the correct header pointer
+	@ strings are equal, T0 is the correct entry pointer
 	b	4f
 2:
-	ldr	r0, [r0]	@ previous dictionary pointer
-	b	1b		@ try again
+	ldr	T0, [T0]		@ previous dictionary pointer
+	b	1b			@ try again
 4:
-        ldmfd   sp!, {r4, r5, r6, r7}
-	bx	lr		@ not found
-
+	ldmfd   sp!, {S0,S1,S2,S3}
+	bx	lr
 
 
 
