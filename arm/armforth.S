@@ -298,17 +298,63 @@ code_\label :
 	PUSHPSP	T0
 	NEXT
 
-@ TODO: register names inconsistent from here on out
 
-	@ TODO this is FAKE for now
+
 	defcode "/MOD",4,,DIVMOD
-	POPPSP	r0
-	POPPSP	r1
-	mov	r0, #3
-	mov	r1, #10
-	PUSHPSP	r0		@ remainder
-	PUSHPSP	r1		@ quotient
+	POPPSP	T0		@ dividend?
+	POPPSP	T1		@ divisor?
+	bl	_DIVMOD
+	PUSHPSP	T0		@ remainder
+	PUSHPSP	T1		@ quotient
 	NEXT
+_DIVMOD:
+	@ DIVMOD (x: T0, y: T1) (q: T0, r: T1)
+	stmfd	sp!, {S0, S1}
+
+	@ if signs differ, we need to negate the quotient later
+	eors	S0, T0, T1
+	movmi	S0, #1		@ yes we should negate
+	movpl	S0, #0		@ no we are fine
+
+	@ absolute values for division algorithm
+	cmp	T0, #0
+	rsbmi	T0, T0, #0
+	cmp	T1, #0
+	rsbmi	T1, T1, #0
+
+	mov	T2, #0		@ quotient q
+	mov	T3, T1		@ remainder r
+	mov	S1, T0		@ old divisor y
+
+1:	@ shift divisor
+	cmp	T1, T0		@ y <= x
+	movle	T1, T1, LSL #1	@ y = y * 2
+	ble	1b
+
+2:	@ perform division
+	cmp	T1, S1		@ y != old y
+	beq	3f		@ done
+	mov	T1, T1, LSR #1	@ y = y / 2
+	mov	T2, T2, LSL #1	@ q = q * 2
+	cmp	T3, T1		@ r >= y
+	subge	T3, T3, T1	@ r = r - y
+	addge	T2, T2, #1	@ q = q + 1
+	b	2b
+3:
+	@ now T2 quotient T3 remainder
+	cmp	S0, #0		@ initial signs differed?
+	rsbne	T2, T2, #0	@ negate quotient!
+
+	mov	T0, T2
+	mov	T1, T3
+
+	ldmfd	sp!, {S0, S1}
+	bx	lr
+
+
+
+
+@ TODO: register names inconsistent from here on out
 
 	@ use 1 for true and 0 for false!
 
