@@ -353,7 +353,6 @@ _DIVMOD:
 
 
 
-
 @ TODO: register names inconsistent from here on out
 
 	@ use 1 for true and 0 for false!
@@ -493,8 +492,8 @@ _DIVMOD:
 	NEXT
 
 	defcode "LIT",3,,LIT
-	ldr	r0, [NIP], #4
-	PUSHPSP	r0
+	ldr	T0, [NIP], #4	@ grab and skip literal value
+	PUSHPSP	T0		@ push it
 	NEXT
 
 	defcode "!",1,,STORE
@@ -739,60 +738,67 @@ word_buffer:
 	.space 32
 
 
+
 	defcode "NUMBER",6,,NUMBER
-	POPPSP	r3		@ length of string
-	POPPSP	r2		@ address of string
+	POPPSP	T1		@ length of string
+	POPPSP	T0		@ address of string
 	bl	_NUMBER
-	PUSHPSP	r0		@ number
-	PUSHPSP	r1		@ # unparsed
+	PUSHPSP	T0		@ number
+	PUSHPSP	T1		@ # unparsed
 	NEXT
 
 _NUMBER:
-	mov	r0, #0		@ number
-	mov	r1, #0		@ # unparsed
+	@ NUMBER(address: T0, length: T1) (number: T0, unparsed: T1)
+	stmfd	sp!, {S0,S1,S2,S3}
 
-	cmp	r3, #0		@ zero length?
-	beq	5f		@ error!
+	mov	T2, T0		@ address
+	mov	T3, T1		@ length
+	mov	T0, #0		@ number
+	mov	T1, #0		@ unparsed
+	cmp	T3, #0		@ length <= 0?
+	ble	5f		@ really an error, but "fake" a 0 instead
 
-	ldr	r4, =var_BASE
-	ldr	r4, [r4]	@ get BASE
-
-	ldrb	r5, [r2], #1	@ get character and increment address
-	mov	r6, #0		@ set negative flag false
-	cmp	r5, #'-'	@ leading '-'?
+	ldr	S0, =var_BASE
+	ldr	S0, [S0]	@ get BASE
+	ldrb	S1, [T2], #1	@ get character and increment address
+	mov	S3, #0		@ set negative flag false
+	cmp	S1, #'-'	@ leading '-'?
 	bne	2f		@ nope, try to parse as digit
 
-	mov	r6, #1		@ set negative flag true
-	subs	r3, r3, #1	@ decrement length
+	mov	S3, #1		@ set negative flag true
+	subs	T3, T3, #1	@ decrement length
 	bne	1f		@ >0 so keep going
 
-	mov	r1, #1		@ indicate error
-	bx	lr
+	mov	T1, #1		@ just a sign, no digits, signal an error
+	b	5f		@ error!
 1:
-	mul	r7, r0, r4	@ number = number * BASE
-	mov	r0, r7		@ (need to use another register for mul to avoid warning)
-	ldrb	r5, [r2], #1	@ get character and increment address
+	mul	S2, T0, S0	@ number = number * BASE
+	mov	T0, S2		@ (need to use another register for mul to avoid warning)
+	ldrb	S1, [T2], #1	@ get character and increment address
 2:
-	subs	r5, r5, #'0'	@ try lower digit bound
+	subs	S1, S1, #'0'	@ try lower digit bound
 	blt	4f		@ nope, < '0' so we're done
-	cmp	r5, #10		@ try upper digit bound
+	cmp	S1, #10		@ try upper digit bound
 	blt	3f		@ yes, we got one!
-	subs	r5, r5, #17	@ try lower char bound (17 is 'A'-'0')
+	subs	S1, S1, #17	@ try lower char bound (17 is 'A'-'0')
 	blt	4f		@ nope, < 'A' so we're done
-	add	r5, r5, #10	@ adjust for first 10 digit values before 'A'
+	add	S1, S1, #10	@ adjust for first 10 digit values before 'A'
 3:
-	cmp	r5, r4		@ >= BASE?
+	cmp	S1, S0		@ >= BASE?
 	bge	4f		@ yep, we're done
 
 	@ finally, add new digit to number and loop
-	add	r0, r5
-	subs	r3, r3, #1
+	add	T0, S1
+	subs	T3, T3, #1
 	bne	1b
 4:
-	cmp	r6, #1		@ check negative flag
-	rsbeq	r0, r0, #0	@ yes, negate (r0 = 0 - r0)
+	cmp	S3, #1		@ check negative flag
+	rsbeq	T0, T0, #0	@ yes, negate (r0 = 0 - r0)
 5:
+	ldmfd	sp!, {S0,S1,S2,S3}
 	bx	lr
+
+
 
 
 	defcode "FIND",4,,FIND
@@ -1002,7 +1008,6 @@ _COMMA:
 	@
 	@ FIND(address: r1, length: r2) (address: r0) {saves r4, r5, r6, r7}
 	@ TCFA(address: r0) (address: r0)
-	@ NUMBER(address: r2, length: r3) (number: r0, unparsed: r1)
 	@
 	@ right now making this a bit uglier :-/
 
