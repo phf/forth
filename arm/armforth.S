@@ -1099,7 +1099,139 @@ errmsgend:
 errmsgnl: .ascii "\n"
 
 
+	defcode "CHAR",4,,CHAR
+	bl	_WORD			@ returns T0 = address, T1 = length
+	ldrb	T0, [T0]		@ get first character
+	PUSHPSP	T0			@ push it
+	NEXT
 
+
+	defcode "EXECUTE",7,,EXECUTE
+	POPPSP	T0			@ grab execution token, whatever that is?
+	bx	T0			@ jump to it (execution token's NEXT will continue)
+
+@ The SYSCALL? words are somewhat of a pain for OABI since we don't
+@ pass the syscall number in a register. So instead we need a table
+@ of svc instructions out of which we select one. This requires the
+@ syscall numbers to be "adjusted" appropriately. For EABI we could
+@ do better of course...
+
+	.text
+oabi_syscall_table:
+	.space	8		@ 0 __NR_restart_syscall
+	svc	__NR_exit	@ 1
+	bx	lr
+	.space	8		@ 2 __NR_fork
+	svc	__NR_read	@ 3
+	bx	lr
+	svc	__NR_write	@ 4
+	bx	lr
+	svc	__NR_open	@ 5
+	bx	lr
+	svc	__NR_close	@ 6
+	bx	lr
+	.space	8		@ 7 __NR_waitpid (deprecated)
+	svc	__NR_creat	@ 8
+	bx	lr
+	.space	8		@ 9
+	.space	8		@ 10
+	.space	8		@ 11
+	.space	8		@ 12
+	.space	8		@ 13
+	.space	8		@ 14
+	.space	8		@ 15
+	.space	8		@ 16
+	.space	8		@ 17
+	.space	8		@ 18
+	.space	8		@ 19
+	.space	8		@ 20
+	.space	8		@ 21
+	.space	8		@ 22
+	.space	8		@ 23
+	.space	8		@ 24
+	.space	8		@ 25
+	.space	8		@ 26
+	.space	8		@ 27
+	.space	8		@ 28
+	.space	8		@ 29
+	.space	8		@ 30
+	.space	8		@ 31
+	.space	8		@ 32
+	.space	8		@ 33
+	.space	8		@ 34
+	.space	8		@ 35
+	.space	8		@ 36
+	.space	8		@ 37
+	.space	8		@ 38
+	.space	8		@ 39
+	.space	8		@ 40
+	.space	8		@ 41
+	.space	8		@ 42
+	.space	8		@ 43
+	.space	8		@ 44
+	svc	__NR_brk	@ 45
+	bx	lr
+	.space	8		@ 46
+	.space	8		@ 47
+	.space	8		@ 48
+	.space	8		@ 49
+	.space	8		@ 50
+
+
+
+	defcode "SYSCALL3",8,,SYSCALL3
+	POPPSP	r7		@ syscall number
+	@ begin OABI adjustments
+	sub	r7, r7, #__NR_OABI_SYSCALL_BASE
+	ldr	r0, =oabi_syscall_table
+	add	r7, r0, r7, LSL #3
+	@ end OABI adjustments
+	POPPSP	r0		@ first parameter
+	POPPSP	r1		@ second parameter
+	POPPSP	r2		@ third parameter
+	@ OABI system call
+	blx	r7
+	PUSHPSP	r0		@ result
+	NEXT
+
+	defcode "SYSCALL2",8,,SYSCALL2
+	POPPSP	r7		@ syscall number
+	@ begin OABI adjustments
+	sub	r7, r7, #__NR_OABI_SYSCALL_BASE
+	ldr	r0, =oabi_syscall_table
+	add	r7, r0, r7, LSL #3
+	@ end OABI adjustments
+	POPPSP	r0		@ first parameter
+	POPPSP	r1		@ second parameter
+	@ OABI system call
+	blx	r7
+	PUSHPSP	r0		@ result
+	NEXT
+
+	defcode "SYSCALL1",8,,SYSCALL1
+	POPPSP	r7		@ syscall number
+	@ begin OABI adjustments
+	sub	r7, r7, #__NR_OABI_SYSCALL_BASE
+	ldr	r0, =oabi_syscall_table
+	add	r7, r0, r7, LSL #3
+	@ end OABI adjustments
+	POPPSP	r0		@ first parameter
+	@ OABI system call
+	blx	r7
+	PUSHPSP	r0		@ result
+	NEXT
+
+	defcode "SYSCALL0",8,,SYSCALL0
+	POPPSP	r7		@ syscall number
+	@ begin OABI adjustments
+	sub	r7, r7, #__NR_OABI_SYSCALL_BASE
+	ldr	r0, =oabi_syscall_table
+	add	r7, r0, r7, LSL #3
+	@ end OABI adjustments
+	@ OABI system call
+	blx	r7
+	PUSHPSP	r0		@ result
+	NEXT
 
 	.set RETURN_STACK_SIZE,8192
 	.set BUFFER_SIZE,4096
