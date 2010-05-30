@@ -24,24 +24,24 @@
 @ to most of the "official" ABI specification, which
 @ roughly states the following:
 @
-@ register	aliases		notes
+@	register	aliases		notes
 @
-@ r15		pc		program counter
-@ r14		lr		link register
-@ r13		sp		stack pointer
-@ r12		ip		linker scratch
-@ r11		v8		variable
-@ r10		v7		variable
-@ r9		v6/sb/tr	variable/platform special
-@ r8		v5		variable
-@ r7		v4		variable/EABI special*
-@ r6		v3		variable
-@ r5		v2		variable
-@ r4		v1		variable
-@ r3		a4		argument/scratch
-@ r2		a3		argument/scratch
-@ r1		a2		argument/result/scratch
-@ r0		a1		argument/result/scratch
+@	r15		pc		program counter
+@	r14		lr		link register
+@	r13		sp		stack pointer
+@	r12		ip		linker scratch
+@	r11		v8		variable
+@	r10		v7		variable
+@	r9		v6/sb/tr	variable/platform special
+@	r8		v5		variable
+@	r7		v4		variable/EABI special*
+@	r6		v3		variable
+@	r5		v2		variable
+@	r4		v1		variable
+@	r3		a4		argument/scratch
+@	r2		a3		argument/scratch
+@	r1		a2		argument/result/scratch
+@	r0		a1		argument/result/scratch
 @
 @ *ARM Linux EABI uses r7 for the system call number,
 @  making r7 "special" too. :-/
@@ -56,13 +56,13 @@
 @ From the mess above we derive the following register
 @ conventions for FORTH:
 @
-@ register	mnemonic	notes
+@	register	mnemonic	notes
 @
-@ r13/sp	PSP		parameter stack pointer
-@ r11/v8	RSP		return stack pointer
-@ r10/v7	NIP		next instruction pointer
-@ r4-r6,r8	S0-S3		callee saved temporaries
-@  r0-r3	T0-T3		caller saved temporaries
+@	r13/sp		PSP		parameter stack pointer
+@	r11/v8		RSP		return stack pointer
+@	r10/v7		NIP		next instruction pointer
+@	r4-r6,r8	S0-S3		callee saved temporaries
+@	r0-r3		T0-T3		caller saved temporaries
 @
 @ We simply try to stay clear of all the "special" stuff,
 @ which still leaves us with enough room to play. The S?
@@ -810,6 +810,7 @@ _NUMBER:
 	NEXT
 
 _FIND:
+	@ FIND (address: T0, length: T1) (address: T0)
 	stmfd	sp!, {S0,S1,S2,S3}
 
 	mov	T2, T1			@ length
@@ -852,19 +853,22 @@ _FIND:
 
 
 	defcode ">CFA",4,,TCFA
-	POPPSP	r0
+	POPPSP	T0
 	bl	_TCFA
-	PUSHPSP	r0
+	PUSHPSP	T0
 	NEXT
 _TCFA:
-	add	r0, r0, #4		@ skip link pointer
-	ldrb	r1, [r0]		@ load flags+len
-	add	r0, r0, #1		@ skip flags+len bytes
-	and	r1, r1, #F_LENMASK	@ mask out flags
-	add	r0, r0, r1		@ skip name
-	add	r0, r0, #3		@ align to 4-byte boundary
-	and	r0, r0, #~3
+	@ TCFA (address: T0) (address: T0)
+	add	T0, T0, #4		@ skip link pointer
+	ldrb	T1, [T0]		@ load flags+len
+	add	T0, T0, #1		@ skip flags+len bytes
+	and	T1, T1, #F_LENMASK	@ mask out flags
+	add	T0, T0, T1		@ skip name
+	add	T0, T0, #3		@ align to 4-byte boundary
+	and	T0, T0, #~3
 	bx	lr
+
+
 
 	defword ">DFA",4,,TDFA
 	.int TCFA		// >CFA		(get code field address)
@@ -1006,13 +1010,6 @@ _COMMA:
 	.int BRANCH,-8		// and loop (indefinitely)
 
 
-	@ for x86 the result of WORD fits right into FIND but
-	@ we have
-	@
-	@ FIND(address: r1, length: r2) (address: r0) {saves r4, r5, r6, r7}
-	@ TCFA(address: r0) (address: r0)
-	@
-	@ right now making this a bit uglier :-/
 
 
 	defcode "INTERPRET",9,,INTERPRET
