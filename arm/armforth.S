@@ -97,6 +97,7 @@
 	.set	stderr,2
 
 	.macro NEXT
+	bl	debug_ping
 	ldr	T0, [NIP], #4		@ load codeword address from NIP, increment
 	bx	T0			@ jump to codeword
 	.endm
@@ -138,6 +139,7 @@ _start:
 	bl	set_up_data_segment
 	ldr	NIP, =cold_start	@ initialize interpreter
 	NEXT
+	.pool
 
 	.section .rodata
 cold_start:
@@ -1246,6 +1248,20 @@ set_up_data_segment:
 
 	.set RETURN_STACK_SIZE,8192
 	.set BUFFER_SIZE,4096
+
+	.text
+debug_ping:
+	stmfd	sp!, {r0-r12}
+	mov	r0, #stderr
+	ldr	r1, =debugmsg		@ address
+	mov	r2, #debugend-debugmsg	@ length
+	svc	__NR_write
+	ldmfd	sp!, {r0-r12}
+	bx	lr
+	.section .rodata
+debugmsg:
+	.ascii "\nPING!\n"
+debugend:
 
 	.bss
 	.align 12
