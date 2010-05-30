@@ -907,10 +907,11 @@ _TCFA:
 
 
 	defcode ",",1,,COMMA
-	POPPSP	r0
+	POPPSP	T0
 	bl	_COMMA
 	NEXT
 _COMMA:
+	@ COMMA (codeword: T0) ()
 	ldr	r1, =var_HERE	@ address of HERE
 	ldr	r2, [r1]	@ value of HERE
 	str	r0, [r2], #4	@ store code word, increment
@@ -1012,88 +1013,83 @@ _COMMA:
 
 
 
+
 	defcode "INTERPRET",9,,INTERPRET
-	mov	r7, #0			@ reset interpret_is_lit flag
+	mov	S3, #0			@ reset interpret_is_lit flag
 
-	bl	_WORD			@ returns r0 = address, r1 = length
-	mov	r6, r1			@ backup of address of string
-	mov	r5, r0			@ backup of length of string
-	mov	r2, r6			@ adjust for FIND call
-	mov	r1, r5
-	bl	_FIND			@ returns r0 = dictionary entry or NULL
-	cmp	r0, #0			@ = NULL?
-	beq	1f			@ not found
+	bl	_WORD			@ returns T0 = address, T1 = length
+	mov	S0, T0			@ address
+	mov	S1, T1			@ length
+	bl	_FIND			@ returns T0 = dictionary entry
+	cmp	T0, #0			@ = NULL?
+	beq	1f			@ not found!
 
-	ldrb	r6, [r0, #4]		@ load length/flags byte
+	@ found in dictionary, check if it's immediate
+	ldrb	S2, [T0, #4]		@ load length/flags byte
+	bl	_TCFA			@ returns T0 = codeword pointer 
+	tst	S2, #F_IMMED		@ test immediate flag
+	bne	4f			@ jump straight to execute!
+	b	2f			@ jump to compile/execute?
 
+1:	@ not in dictionary, check if it's a number
+	add	S3, S3, #1		@ set interpret_is_lit flag
+	mov	T0, S0			@ address
+	mov	T1, S1			@ length
+	bl	_NUMBER			@ returns T0 = number, T1 = unparsed
+	cmp	T1, #0			@ unparsed > 0?
+	bne	6f			@ error!
 
-	// In the dictionary.  Is it an IMMEDIATE codeword?
-	mov %eax,%edi		// %edi = dictionary entry
-	movb 4(%edi),%al	// Get name+flags.
-	push %ax		// Just save it for now.
-	call _TCFA		// Convert dictionary entry (in %edi) to codeword pointer.
-	pop %ax
-	andb $F_IMMED,%al	// Is IMMED flag set?
-	mov %edi,%eax
-	jnz 4f			// If IMMED, jump straight to executing.
+	mov	S2, T0			@ number
+	ldr	T0, =LIT		@ codeword is LIT
 
-	jmp 2f
+2:	@ compiling or executing?
+	ldr	T2, =var_STATE		@ address of STATE
+	ldr	T2, [T2]		@ value of STATE
+	cmp	T2, #0			@ STATE == 0?
+	beq	4f			@ jump straight to execute!
 
-1:	// Not in the dictionary (not a word) so assume it's a literal number.
-	incl interpret_is_lit
-	call _NUMBER		// Returns the parsed number in %eax, %ecx > 0 if error
-	test %ecx,%ecx
-	jnz 6f
-	mov %eax,%ebx
-	mov $LIT,%eax		// The word is LIT
+	@ compiling, append word to current dictionary definition
+	bl	_COMMA			@ expects codeword in T0
+	cmp	S3, #0			@ interpret_is_lit == 0?
+	beq	3f			@ yep, so we're done
 
-2:	// Are we compiling or executing?
-	movl var_STATE,%edx
-	test %edx,%edx
-	jz 4f			// Jump if executing.
-
-	// Compiling - just append the word to the current dictionary definition.
-	call _COMMA
-	mov interpret_is_lit,%ecx // Was it a literal?
-	test %ecx,%ecx
-	jz 3f
-	mov %ebx,%eax		// Yes, so LIT is followed by a number.
-	call _COMMA
-3:	NEXT
-
-4:	// Executing - run it!
-	mov interpret_is_lit,%ecx // Literal?
-	test %ecx,%ecx		// Literal?
-	jnz 5f
-
-	// Not a literal, execute it now.  This never returns, but the codeword will
-	// eventually call NEXT which will reenter the loop in QUIT.
-	jmp *(%eax)
-
-5:	// Executing a literal, which means push it on the stack.
-	push %ebx
+	mov	T0, S2			@ number
+	bl	_COMMA			@ expects codeword in T0
+3:
 	NEXT
 
 
+4:	@ executing, so run the word
+	cmp	S3, #0			@ interpret_is_lit != 0?
+	bne	5f			@ yep, so let's push
+
+	@ not a literal, execute! never returns, but eventually NEXT will get
+	@ called and reenter the loop in QUIT
+	bx	T0
+
+5:	@ execute literal, which means push it
+	PUSHPSP	S2
+	NEXT
+
 6:
 	@ parse error, print context from input buffer
-	mov	r0, #stderr
-	ldr	r1, =errmsg		@ address
-	mov	r2, #errmsgend-errmsg	@ length
+	mov	T0, #stderr
+	ldr	T1, =errmsg		@ address
+	mov	T2, #errmsgend-errmsg	@ length
 	svc	__NR_write
 
-	mov	r0, #stderr
-	ldr	r1, =currkey		@ address of currkey
-	ldr	r1, [r1]		@ value of currkey, pointer in buffer
-	ldr	r2, =buffer		@ address of buffer
-	ldr	r2, r1, r2		@ length = currkey - buffer
-	cmp	r2, #40			@ > 40?
-	movgt	r2, #40			@ cap at 40
+	mov	T0, #stderr
+	ldr	T1, =currkey		@ address of currkey
+	ldr	T1, [T1]		@ value of currkey, pointer in buffer
+	ldr	T2, =buffer		@ address of buffer
+	sub	T2, T1, T2		@ length = currkey - buffer
+	cmp	T2, #40			@ > 40?
+	movgt	T2, #40			@ cap at 40
 	svc	__NR_write
 
-	mov	r0, #stderr
-	ldr	r1, =errmsgnl		@ address
-	mov	r2, #1			@ length
+	mov	T0, #stderr
+	ldr	T1, =errmsgnl		@ address
+	mov	T2, #1			@ length
 	svc	__NR_write
 	NEXT
 
