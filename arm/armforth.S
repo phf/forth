@@ -135,7 +135,7 @@ _start:
 	ldr	T0, =var_S0		@ address of var_S0
 	str	PSP, [T0]		@ store initial PSP in var_S0
 	ldr	RSP, =return_stack_top	@ initialize return stack
-@TODO	call set_up_data_segment
+	bl	set_up_data_segment
 	ldr	NIP, =cold_start	@ initialize interpreter
 	NEXT
 
@@ -1232,6 +1232,17 @@ oabi_syscall_table:
 	blx	r7
 	PUSHPSP	r0		@ result
 	NEXT
+
+	.text
+	.set INITIAL_DATA_SEGMENT_SIZE,65536
+set_up_data_segment:
+	mov	r0, #0
+	svc	__NR_brk
+	ldr	r1, =var_HERE
+	str	r0, [r1]
+	add	r0, r0, #INITIAL_DATA_SEGMENT_SIZE
+	svc	__NR_brk
+	bx	lr
 
 	.set RETURN_STACK_SIZE,8192
 	.set BUFFER_SIZE,4096
