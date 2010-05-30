@@ -17,3 +17,9 @@ port that I could find:
 I've checked all of these into git for my own reference, but the only thing
 that's actually "mine" is the ARM version. I'll decide on a license at some
 point too. :-D
+
+Update: I found two more clones of Richard Jones' FORTH, here are the links
+just for completeness:
+
+  http://code.google.com/p/ruda/source/browse/trunk/jonesforth-macintel.s
+  http://subvert-the-dominant-paradigm.net/blog/?p=54
