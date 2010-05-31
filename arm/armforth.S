@@ -78,6 +78,8 @@
 @
 @ can we use load/store multiple to our advantage?
 
+#include <asm/unistd.h>
+
 @ for some reason .set doesn't seem to work for this
 
 #define PSP r13
@@ -97,9 +99,12 @@
 	.set	stderr,2
 
 	.macro NEXT
-	bl	debug_ping
+@	bl	debug_ping
 	ldr	T0, [NIP], #4		@ load codeword address from NIP, increment
-	bx	T0			@ jump to codeword
+	@ used to bx T0 here but that apparently was wrong
+	@ still trying to figure out what I misunderstand...
+	ldr	T1, [T0]
+	bx	T1			@ jump to codeword
 	.endm
 
 	.macro PUSHRSP reg
@@ -122,11 +127,10 @@
 	.text
 	.align 2
 	@ We get here only from NEXT, so T0 is guaranteed to be the codeword
-	@ for DOCOL itself.
+	@ for DOCOL itself. WHAT ABOUT INTERPRET AND T0?
 DOCOL:
 	PUSHRSP	NIP		@ push NIP on return stack
-	add	T0, T0, #4	@ add 4 to codeword to get first dataword
-	mov	NIP, T0		@ make first dataword the NIP
+	add	NIP, T0, #4	@ add 4 to codeword to get first dataword, make that the NIP
 	NEXT
 
 
@@ -182,11 +186,16 @@ name_\label :
 \label :
 	.int code_\label
 	.text
+	.pool
 	.global code_\label
 code_\label :
+	stmfd	sp!, {r0-r12,lr}
+	ldr	r0, =name_\label+5	@ address
+	mov	r1, #\namelen		@ length
+	bl	debug_pong
+	ldmfd	sp!, {r0-r12,lr}
 	@ assembler code follows
 	.endm
-
 
 	defcode "DROP",4,,DROP
 	add PSP, PSP, #4	@ POPPSP would load from memory
@@ -225,6 +234,14 @@ code_\label :
 	PUSHPSP	T0
 	PUSHPSP	T2
 	PUSHPSP	T1
+	NEXT
+
+@ for debugging, switch PONG messages ON/OFF
+	defcode "DONG",4,,DONG
+	ldr	T0, =var_PONG
+	ldr	T1, [T0]
+	mvn	T1, T1
+	str	T1, [T0]
 	NEXT
 
 	defcode "2DROP",5,,TWODROP
@@ -310,6 +327,73 @@ code_\label :
 	PUSHPSP	T1		@ quotient
 	NEXT
 _DIVMOD:
+	@ DIVMOD (x: T0, y: T1) (q: T0, r: T1)
+	stmfd	sp!, {S0, S1}
+
+	@ check for division by 0
+	cmp	T1, #0		@ y == 0?
+	beq	2f
+	@ check for negative args
+	blt	3f
+	cmp	T0, #0
+	blt	3f
+
+	mov	S0, T0		@ x
+	mov	S1, T1		@ y
+
+	mov	T2, #0		@ q
+
+	@ subtract T1 from T0 repeatedly
+1:
+	subs	T0, T0, T1	@ x = x - y
+	addpl	T2, T2, #1	@ if x > 0: q = q + 1
+	bpl	1b		@ until x < 0
+
+	@ quotient in T2 now, compute remainder
+	mul	T0, S1, T2	@ T0 = y * q
+	sub	T1, S0, T0	@ r = x - y * q
+
+	@ move quotient
+	mov	T0, T2
+
+	ldmfd	sp!, {S0, S1}
+	bx	lr
+2:
+	@ division by 0 error
+	mov	T0, #stderr
+	ldr	T1, =divmsg		@ address
+	mov	T2, #divmsgend-divmsg	@ length
+	svc	__NR_write
+	mov	T0, #-1
+	svc	__NR_exit
+
+3:
+	@ division by 0 error
+	mov	T0, #stderr
+	ldr	T1, =posmsg		@ address
+	mov	T2, #posmsgend-posmsg	@ length
+	svc	__NR_write
+	mov	T0, #-1
+	svc	__NR_exit
+
+	.section .rodata
+divmsg: .ascii "DIVISION BY 0!\n"
+divmsgend:
+posmsg: .ascii "NEGATIVE DIVISION!\n"
+posmsgend:
+
+
+
+@ was /MOD but didn't work as expected, needs more
+@ debugging later
+	defcode "/SOD",4,,SIVMOD
+	POPPSP	T0		@ dividend?
+	POPPSP	T1		@ divisor?
+	bl	_SIVMOD
+	PUSHPSP	T0		@ remainder
+	PUSHPSP	T1		@ quotient
+	NEXT
+_SIVMOD:
 	@ DIVMOD (x: T0, y: T1) (q: T0, r: T1)
 	stmfd	sp!, {S0, S1}
 
@@ -561,8 +645,9 @@ _DIVMOD:
 	.macro defvar name, namelen, flags=0, label, initial=0
 	defcode \name,\namelen,\flags,\label
 	ldr	r0, =var_\name	@ load address
-	ldr	r0, [r0]	@ load value from address
-	PUSHPSP	r0		@ push value
+	@ used to ldr r0, [r0] here but we should only push
+	@ the ADDRESS for a variable...
+	PUSHPSP	r0		@ push address
 	NEXT
 	.data
 	.align 2
@@ -575,8 +660,9 @@ var_\name :
 	defvar "LATEST",6,,LATEST,name_SYSCALL0 // SYSCALL0 must be last in built-in dictionary
 	defvar "S0",2,,SZ
 	defvar "BASE",4,,BASE,10
+@ for debugging
+	defvar	"PONG",4,,PONG
 
-#include <asm/unistd.h>
 
 	.macro defconst name, namelen, flags=0, label, value
 	defcode \name,\namelen,\flags,\label
@@ -712,17 +798,17 @@ _WORD:
 	stmfd	sp!, {S0,lr}
 1:
 	bl	_KEY
-	cmp	T0, #'\\'		@ comment?
+	cmp	T0, #'\\'		@ == \?
 	beq	3f			@ skip comment
-	cmp	T0, #' '		@ space?
-	beq	1b			@ keep looking
+	cmp	T0, #' '		@ <= ' '?
+	ble	1b			@ keep looking
 
 	ldr	S0, =word_buffer	@ address
 2:
 	strb	T0, [S0], #1		@ store character, increment pointer
 	bl	_KEY
-	cmp	T0, #' '		@ space?
-	bne	2b			@ keep looking
+	cmp	T0, #' '		@ > ' '?
+	bgt	2b			@ keep looking
 
 	ldr	T0, =word_buffer	@ address
 	sub	T1, S0, T0		@ length
@@ -754,11 +840,9 @@ _NUMBER:
 	stmfd	sp!, {S0,S1,S2,S3}
 
 	mov	T2, T0		@ address
-	mov	T3, T1		@ length
 	mov	T0, #0		@ number
-	mov	T1, #0		@ unparsed
-	cmp	T3, #0		@ length <= 0?
-	ble	5f		@ really an error, but "fake" a 0 instead
+	cmp	T1, #0		@ length <= 0?
+	ble	5f		@ really an error, but returns 0 anyway
 
 	ldr	S0, =var_BASE
 	ldr	S0, [S0]	@ get BASE
@@ -768,8 +852,8 @@ _NUMBER:
 	bne	2f		@ nope, try to parse as digit
 
 	mov	S3, #1		@ set negative flag true
-	subs	T3, T3, #1	@ decrement length
-	bne	1f		@ >0 so keep going
+	subs	T1, T1, #1	@ decrement length
+	bpl	1f		@ >0 so keep going
 
 	mov	T1, #1		@ just a sign, no digits, signal an error
 	b	5f		@ error!
@@ -779,11 +863,11 @@ _NUMBER:
 	ldrb	S1, [T2], #1	@ get character and increment address
 2:
 	subs	S1, S1, #'0'	@ try lower digit bound
-	blt	4f		@ nope, < '0' so we're done
+	bmi	4f		@ nope, < '0' so we're done
 	cmp	S1, #10		@ try upper digit bound
 	blt	3f		@ yes, we got one!
 	subs	S1, S1, #17	@ try lower char bound (17 is 'A'-'0')
-	blt	4f		@ nope, < 'A' so we're done
+	bmi	4f		@ nope, < 'A' so we're done
 	add	S1, S1, #10	@ adjust for first 10 digit values before 'A'
 3:
 	cmp	S1, S0		@ >= BASE?
@@ -791,7 +875,7 @@ _NUMBER:
 
 	@ finally, add new digit to number and loop
 	add	T0, S1
-	subs	T3, T3, #1
+	subs	T1, T1, #1
 	bne	1b
 4:
 	cmp	S3, #1		@ check negative flag
@@ -896,10 +980,10 @@ _TCFA:
 	@ r4 and r5 are also free again
 1:
 	cmp	r1, #0
-	ldrgtb	r4, [r1], #1	@ get character, increment
+	ldrgtb	r4, [r0], #1	@ get character, increment
 	strgtb	r4, [r3], #1	@ put character, increment header
 	subs	r1, r1, #1	@ decrement length
-	bgt	1b
+	bpl	1b
 
 	add	r3, r3, #3	@ align
 	and	r3, r3, #~3
@@ -1000,12 +1084,16 @@ _COMMA:
 	NEXT
 
 	defcode "TELL",4,,TELL
-	mov	T0, #stdout
-	POPPSP	T2		@ length
-	POPPSP	T1		@ address
-	svc	__NR_write
+	POPPSP	T1		@ length
+	POPPSP	T0		@ address
+	bl	_TELL
 	NEXT
-
+_TELL:
+	mov	T2, T1		@ length
+	mov	T1, T0		@ address
+	mov	T0, #stdout
+	svc	__NR_write
+	bx	lr
 
 	defword "QUIT",4,,QUIT
 	.int RZ,RSPSTORE	// R0 RSP!, clear the return stack
@@ -1067,7 +1155,8 @@ _COMMA:
 
 	@ not a literal, execute! never returns, but eventually NEXT will get
 	@ called and reenter the loop in QUIT
-	bx	T0
+	ldr	T1, [T0]
+	bx	T1
 
 5:	@ execute literal, which means push it
 	PUSHPSP	S2
@@ -1087,6 +1176,7 @@ _COMMA:
 	sub	T2, T1, T2		@ length = currkey - buffer
 	cmp	T2, #40			@ > 40?
 	movgt	T2, #40			@ cap at 40
+	sub	T1, T1, T2		@ ??????
 	svc	__NR_write
 
 	mov	T0, #stderr
@@ -1238,17 +1328,24 @@ oabi_syscall_table:
 	.text
 	.set INITIAL_DATA_SEGMENT_SIZE,65536
 set_up_data_segment:
-	mov	r0, #0
-	svc	__NR_brk
+@ current setup for debugging
+	ldr	r0, =data_segment
 	ldr	r1, =var_HERE
 	str	r0, [r1]
-	add	r0, r0, #INITIAL_DATA_SEGMENT_SIZE
-	svc	__NR_brk
 	bx	lr
+@ original code to make data segment extensible
+@	mov	r0, #0
+@	svc	__NR_brk
+@	ldr	r1, =var_HERE
+@	str	r0, [r1]
+@	add	r0, r0, #INITIAL_DATA_SEGMENT_SIZE
+@	svc	__NR_brk
+@	bx	lr
 
 	.set RETURN_STACK_SIZE,8192
 	.set BUFFER_SIZE,4096
 
+@ very basic debugging helper
 	.text
 debug_ping:
 	stmfd	sp!, {r0-r12}
@@ -1263,6 +1360,43 @@ debugmsg:
 	.ascii "\nPING!\n"
 debugend:
 
+@ debugging helper for assembly words
+@ expects address in T0, length in T1
+@ controlled by PONG FORTH variable
+@ use DONG word to toggle ON/OFF
+	.text
+debug_pong:
+	mov	S0, T0
+	mov	S1, T1
+
+	ldr	T0, =var_PONG
+	ldr	T0, [T0]
+	cmp	T0, #0
+	beq	1f
+
+	mov	T0, #stderr
+	ldr	T1, =rmsg		@ address
+	mov	T2, #rmsgend-rmsg	@ length
+	svc	__NR_write
+
+	mov	T0, #stderr
+	mov	T1, S0
+	mov	T2, S1
+	svc	__NR_write
+
+	mov	T0, #stderr
+	ldr	T1, =rmsgnl		@ address
+	mov	T2, #1			@ length
+	svc	__NR_write
+1:
+	bx	lr
+
+	.section .rodata
+rmsg: .ascii "PONG: "
+rmsgend:
+rmsgnl: .ascii "\n"
+
+
 	.bss
 	.align 12
 return_stack:
@@ -1272,3 +1406,8 @@ return_stack_top:
 	.align 12
 buffer:
 	.space BUFFER_SIZE
+
+@ current setup for debugging, not extensible
+	.align	12
+data_segment:
+	.space	INITIAL_DATA_SEGMENT_SIZE
