@@ -3,7 +3,7 @@
 	This is PUBLIC DOMAIN (see public domain release statement below).
 	$Id: jonesforth.S,v 1.47 2009-09-11 08:33:13 rich Exp $
 
-	gcc -m32 -nostdlib -static -Wl,-Ttext,0 -Wl,--build-id=none -o jonesforth jonesforth.S
+	gcc -m32 -nostdlib -static -Wl,--build-id=none -o jonesforth jonesforth.S
 */
 	.set JONES_VERSION,47
 /*
@@ -121,7 +121,7 @@
 	Again, to assemble this you will need gcc and gas (the GNU assembler).  The commands to
 	assemble and run the code (save this file as 'jonesforth.S') are:
 
-	gcc -m32 -nostdlib -static -Wl,-Ttext,0 -Wl,--build-id=none -o jonesforth jonesforth.S
+	gcc -m32 -nostdlib -static -Wl,--build-id=none -o jonesforth jonesforth.S
 	cat jonesforth.f - | ./jonesforth
 
 	If you want to run your own FORTH programs you can do:
