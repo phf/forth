@@ -12,13 +12,13 @@ I need to learn ARM assembly in a hurry, and I figured porting a FORTH might
 be a decent way to do that. I came across Richard Jones' wonderful FORTH and
 that's what I settled on:
 
-  http://annexia.org/forth
+- http://annexia.org/forth
 
 There seem to be ports to both PowerPC and Motorola 68k already, but no ARM
 port that I could find:
 
-  http://www.lshift.net/blog/2007/10/04/jonesforth-ported-to-powerpc-and-mac-os-x
-  http://www.copypastecode.com/14589/
+- http://www.lshift.net/blog/2007/10/04/jonesforth-ported-to-powerpc-and-mac-os-x
+- http://www.copypastecode.com/14589/
 
 I've checked all of these into git for my own reference, but the only thing
 that's actually "mine" is the ARM version. I'll decide on a license at some
@@ -27,5 +27,5 @@ point too. :-D
 Update: I found two more clones of Richard Jones' FORTH, here are the links
 just for completeness:
 
-  http://code.google.com/p/ruda/source/browse/trunk/jonesforth-macintel.s
-  http://subvert-the-dominant-paradigm.net/blog/?p=54
+- http://code.google.com/p/ruda/source/browse/trunk/jonesforth-macintel.s
+- http://subvert-the-dominant-paradigm.net/blog/?p=54
