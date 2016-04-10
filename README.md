@@ -1,6 +1,12 @@
-===================================
-Porting Richard Jones' FORTH to ARM
-===================================
+# Porting Richard Jones' FORTH to ARM
+
+Back in 2010 I started porting an x86 FORTH to ARM, mostly to learn ARM
+assembly. Sadly I never finished the port, I stopped when I felt I had
+learned enough. Of course I had meant to come back to it eventually, but
+stuff happened, life got in the way. Now it's 2016 and I am going to try
+to get back into it. No promises though!
+
+## Original README (2010)
 
 I need to learn ARM assembly in a hurry, and I figured porting a FORTH might
 be a decent way to do that. I came across Richard Jones' wonderful FORTH and
