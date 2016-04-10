@@ -6,6 +6,12 @@ learned enough. Of course I had meant to come back to it eventually, but
 stuff happened, life got in the way. Now it's 2016 and I am going to try
 to get back into it. No promises though!
 
+BTW, in the meantime two very interesting ARM-and-FORTH-related things
+have made an appearance on github.com:
+
+- https://github.com/M2IHP13-admin/JonesForth-arm
+- https://github.com/organix/pijFORTHos
+
 ## Original README (2010)
 
 I need to learn ARM assembly in a hurry, and I figured porting a FORTH might
