@@ -363,18 +363,22 @@ _DIVMOD:
 	mov	T0, #stderr
 	ldr	T1, =divmsg		@ address
 	mov	T2, #divmsgend-divmsg	@ length
-	svc	__NR_write
+	mov	r7, #__NR_write
+	svc	#0
 	mov	T0, #-1
-	svc	__NR_exit
+	mov	r7, #__NR_exit
+	svc	#0
 
 3:
 	@ division by 0 error
 	mov	T0, #stderr
 	ldr	T1, =posmsg		@ address
 	mov	T2, #posmsgend-posmsg	@ length
-	svc	__NR_write
+	mov	r7, #__NR_write
+	svc	#0
 	mov	T0, #-1
-	svc	__NR_exit
+	mov	r7, #__NR_exit
+	svc	#0
 
 	.section .rodata
 divmsg: .ascii "DIVISION BY 0!\n"
@@ -748,10 +752,11 @@ _KEY:
 	ldmfd	sp!, {S2,S3}
 	bx	lr			@ return
 1:
+	mov	r7, #__NR_read
 	mov	T0, #stdin
 	ldr	T1, =buffer
 	mov	T2, #BUFFER_SIZE
-	svc	__NR_read
+	svc	#0
 	cmp	T0, #0			@ <= 0?
 	ble	2f			@ yes, fatal error
 	ldr	T1, =buffer
@@ -760,7 +765,8 @@ _KEY:
 	str	T1, [S2]		@ update bufftop (with length we read)
 	b	3b			@ try fast path again
 2:
-	svc	__NR_exit		@ exit (with error code from NR_read)
+	mov	r7, #__NR_exit
+	svc	#0			@ exit (with error code from NR_read)
 
 	.data
 	.align 2
@@ -780,7 +786,8 @@ _EMIT:
 	ldr	T1, =emit_scratch	@ buffer
 	strb	T0, [T1]		@ store char in buffer
 	mov	T0, #stdout
-	svc	__NR_write
+	mov	r7, #__NR_write
+	svc	#0
 	bx	lr
 
 	.data
@@ -1092,7 +1099,8 @@ _TELL:
 	mov	T2, T1		@ length
 	mov	T1, T0		@ address
 	mov	T0, #stdout
-	svc	__NR_write
+	mov	r7, #__NR_write
+	svc	#0
 	bx	lr
 
 	defword "QUIT",4,,QUIT
@@ -1167,7 +1175,8 @@ _TELL:
 	mov	T0, #stderr
 	ldr	T1, =errmsg		@ address
 	mov	T2, #errmsgend-errmsg	@ length
-	svc	__NR_write
+	mov	r7, #__NR_write
+	svc	#0
 
 	mov	T0, #stderr
 	ldr	T1, =currkey		@ address of currkey
@@ -1177,12 +1186,14 @@ _TELL:
 	cmp	T2, #40			@ > 40?
 	movgt	T2, #40			@ cap at 40
 	sub	T1, T1, T2		@ ??????
-	svc	__NR_write
+	mov	r7, #__NR_write
+	svc	#0
 
 	mov	T0, #stderr
 	ldr	T1, =errmsgnl		@ address
 	mov	T2, #1			@ length
-	svc	__NR_write
+	mov	r7, #__NR_write
+	svc	#0
 	NEXT
 
 	.section .rodata
@@ -1202,126 +1213,34 @@ errmsgnl: .ascii "\n"
 	POPPSP	T0			@ grab execution token, whatever that is?
 	bx	T0			@ jump to it (execution token's NEXT will continue)
 
-@ The SYSCALL? words are somewhat of a pain for OABI since we don't
-@ pass the syscall number in a register. So instead we need a table
-@ of svc instructions out of which we select one. This requires the
-@ syscall numbers to be "adjusted" appropriately. For EABI we could
-@ do better of course...
-
-	.text
-oabi_syscall_table:
-	.space	8		@ 0 __NR_restart_syscall
-	svc	__NR_exit	@ 1
-	bx	lr
-	.space	8		@ 2 __NR_fork
-	svc	__NR_read	@ 3
-	bx	lr
-	svc	__NR_write	@ 4
-	bx	lr
-	svc	__NR_open	@ 5
-	bx	lr
-	svc	__NR_close	@ 6
-	bx	lr
-	.space	8		@ 7 __NR_waitpid (deprecated)
-	svc	__NR_creat	@ 8
-	bx	lr
-	.space	8		@ 9
-	.space	8		@ 10
-	.space	8		@ 11
-	.space	8		@ 12
-	.space	8		@ 13
-	.space	8		@ 14
-	.space	8		@ 15
-	.space	8		@ 16
-	.space	8		@ 17
-	.space	8		@ 18
-	.space	8		@ 19
-	.space	8		@ 20
-	.space	8		@ 21
-	.space	8		@ 22
-	.space	8		@ 23
-	.space	8		@ 24
-	.space	8		@ 25
-	.space	8		@ 26
-	.space	8		@ 27
-	.space	8		@ 28
-	.space	8		@ 29
-	.space	8		@ 30
-	.space	8		@ 31
-	.space	8		@ 32
-	.space	8		@ 33
-	.space	8		@ 34
-	.space	8		@ 35
-	.space	8		@ 36
-	.space	8		@ 37
-	.space	8		@ 38
-	.space	8		@ 39
-	.space	8		@ 40
-	.space	8		@ 41
-	.space	8		@ 42
-	.space	8		@ 43
-	.space	8		@ 44
-	svc	__NR_brk	@ 45
-	bx	lr
-	.space	8		@ 46
-	.space	8		@ 47
-	.space	8		@ 48
-	.space	8		@ 49
-	.space	8		@ 50
-
-
 
 	defcode "SYSCALL3",8,,SYSCALL3
 	POPPSP	r7		@ syscall number
-	@ begin OABI adjustments
-	sub	r7, r7, #__NR_OABI_SYSCALL_BASE
-	ldr	r0, =oabi_syscall_table
-	add	r7, r0, r7, LSL #3
-	@ end OABI adjustments
 	POPPSP	r0		@ first parameter
 	POPPSP	r1		@ second parameter
 	POPPSP	r2		@ third parameter
-	@ OABI system call
-	blx	r7
+	svc	#0
 	PUSHPSP	r0		@ result
 	NEXT
 
 	defcode "SYSCALL2",8,,SYSCALL2
 	POPPSP	r7		@ syscall number
-	@ begin OABI adjustments
-	sub	r7, r7, #__NR_OABI_SYSCALL_BASE
-	ldr	r0, =oabi_syscall_table
-	add	r7, r0, r7, LSL #3
-	@ end OABI adjustments
 	POPPSP	r0		@ first parameter
 	POPPSP	r1		@ second parameter
-	@ OABI system call
-	blx	r7
+	svc	#0
 	PUSHPSP	r0		@ result
 	NEXT
 
 	defcode "SYSCALL1",8,,SYSCALL1
 	POPPSP	r7		@ syscall number
-	@ begin OABI adjustments
-	sub	r7, r7, #__NR_OABI_SYSCALL_BASE
-	ldr	r0, =oabi_syscall_table
-	add	r7, r0, r7, LSL #3
-	@ end OABI adjustments
 	POPPSP	r0		@ first parameter
-	@ OABI system call
-	blx	r7
+	svc	#0
 	PUSHPSP	r0		@ result
 	NEXT
 
 	defcode "SYSCALL0",8,,SYSCALL0
 	POPPSP	r7		@ syscall number
-	@ begin OABI adjustments
-	sub	r7, r7, #__NR_OABI_SYSCALL_BASE
-	ldr	r0, =oabi_syscall_table
-	add	r7, r0, r7, LSL #3
-	@ end OABI adjustments
-	@ OABI system call
-	blx	r7
+	svc	#0
 	PUSHPSP	r0		@ result
 	NEXT
 
@@ -1352,7 +1271,8 @@ debug_ping:
 	mov	r0, #stderr
 	ldr	r1, =debugmsg		@ address
 	mov	r2, #debugend-debugmsg	@ length
-	svc	__NR_write
+	mov	r7, #__NR_write
+	svc	#0
 	ldmfd	sp!, {r0-r12}
 	bx	lr
 	.section .rodata
@@ -1377,17 +1297,20 @@ debug_pong:
 	mov	T0, #stderr
 	ldr	T1, =rmsg		@ address
 	mov	T2, #rmsgend-rmsg	@ length
-	svc	__NR_write
+	mov	r7, #__NR_write
+	svc	#0
 
 	mov	T0, #stderr
 	mov	T1, S0
 	mov	T2, S1
-	svc	__NR_write
+	mov	r7, #__NR_write
+	svc	#0
 
 	mov	T0, #stderr
 	ldr	T1, =rmsgnl		@ address
 	mov	T2, #1			@ length
-	svc	__NR_write
+	mov	r7, #__NR_write
+	svc	#0
 1:
 	bx	lr
 
