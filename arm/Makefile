@@ -1,10 +1,13 @@
-all: armforth run
+all: armforth hello
 
 armforth: armforth.S
-	gcc -nostdlib -static -Wl,-Ttext,0 -Wl,--build-id=none -o armforth armforth.S
+	gcc -nostdlib -static -Wl,--build-id=none -o armforth armforth.S
+
+hello:
+	gcc -nostdlib -static -Wl,--build-id=none -o hello hello.S
 
 run:
 	cat ../x86/jonesforth.f - | ./armforth
 
 clean:
-	rm -rf armforth
+	rm -rf armforth hello
