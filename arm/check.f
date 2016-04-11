@@ -1,4 +1,4 @@
-\ Test cases for the basic FORTH interpreter, without jonesforth.f loaded.
+\ Test cases for the FORTH primitives, without jonesforth.f loaded.
 
 \ Test DROP SWAP DUP OVER hacks.
 42 43 DROP EMIT
