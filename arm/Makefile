@@ -9,5 +9,8 @@ hello:
 run:
 	cat ../x86/jonesforth.f - | ./armforth
 
+check:
+	cat check.f | ./armforth
+
 clean:
 	rm -rf armforth hello

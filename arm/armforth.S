@@ -1,6 +1,6 @@
 @ armforth.S - Porting Richard Jones' FORTH to ARM
 @
-@ Copyright (c) 2010 by Peter H. Froehlich <phf@acm.org>
+@ Copyright (c) 2010, 2016 by Peter H. Froehlich <phf@acm.org>
 @ All right reserved.
 @
 @ Please read Richard's original version if you want
@@ -27,121 +27,160 @@
 @	register	aliases		notes
 @
 @	r15		pc		program counter
-@	r14		lr		link register
+@	r14		lr		link register/scratch
 @	r13		sp		stack pointer
-@	r12		ip		linker scratch
-@	r11		v8		variable
-@	r10		v7		variable
-@	r9		v6/sb/tr	variable/platform special
+@	r12		ip		linker scratch/new sb?
+@	r11		v8/fp		variable/frame pointer
+@	r10		v7/sl		variable/stack limit
+@	r9		v6/sb/tr	variable/static base/platform special
 @	r8		v5		variable
-@	r7		v4		variable/EABI special*
+@	r7		v4		variable/EABI special (syscall)
 @	r6		v3		variable
 @	r5		v2		variable
 @	r4		v1		variable
-@	r3		a4		argument/scratch
-@	r2		a3		argument/scratch
-@	r1		a2		argument/result/scratch
-@	r0		a1		argument/result/scratch
+@	r3		a4		argument/scratch/result
+@	r2		a3		argument/scratch/result
+@	r1		a2		argument/scratch/result
+@	r0		a1		argument/scratch/result
 @
-@ *ARM Linux EABI uses r7 for the system call number,
-@  making r7 "special" too. :-/
-@ 
 @ Registers v1-v8 and sp are callee-saved, except of
 @ course if they are "special". Registers a1-a4 and lr
 @ seem to be caller-saved by implication.
 @
-@ ARMFORTH conventions
-@ ====================
-@
-@ From the mess above we derive the following register
-@ conventions for FORTH:
-@
-@	register	mnemonic	notes
-@
-@	r13/sp		PSP		parameter stack pointer
-@	r11/v8		RSP		return stack pointer
-@	r10/v7		NIP		next instruction pointer
-@	r4-r6,r8	S0-S3		callee saved temporaries
-@	r0-r3		T0-T3		caller saved temporaries
-@
-@ We simply try to stay clear of all the "special" stuff,
-@ which still leaves us with enough room to play. The S?
-@ and T? mnemonics are inspired by MIPS of course.
-@
-@ Notes
-@ =====
+@ Assembly
+@ ========
 @
 @ .align for x86 is bytes, for ARM it's powers of two
 @
-@ TODO
-@ ====
+@ SUB a, b, c <=> a = b - c
+@ RSB a, b, c <=> a = c - b
 @
-@ can we use load/store multiple to our advantage?
+@ CMP a, b <=> flags for a - b
+@
+@ LDR a, [b, #c]  <=> a = M[b + #c]
+@ LDR a, [b, #c]! <=> a = M[b + #c], b = b + #c
+@ LDR a, [b], #c  <=> a = M[b], b = b + #c
+@
+@ FORTH
+@ =====
+@       pre      post
+@       vvvvv    vvv
+@ WORD (a b c -- d e)
+@           ^      ^
+@          top    top
+@
+@	WORD expects c on top, then b, then a
+@	WORD leaves e on top, then d
 
 #include <asm/unistd.h>
 
-@ for some reason .set doesn't seem to work for this
+PSP	.req	r13	@ parameter stack pointer (also ARM sp)
+RSP	.req	r11	@ return stack pointer
+NIP	.req	r10	@ next instruction pointer
+T0	.req	r0	@ caller-saved (our FORTH convention)
+T1	.req	r1
+T2	.req	r2
+T3	.req	r3
+U0	.req	r4	@ callee-saved (our FORTH convention)
+U1	.req	r5	@ (these were S0-S3 for MIPS-appeal originally)
+U2	.req	r6
+U3	.req	r8
 
-#define PSP r13
-#define RSP r11
-#define NIP r10
-#define T0  r0
-#define T1  r1
-#define T2  r2
-#define T3  r3
-#define S0  r4
-#define S1  r5
-#define S2  r6
-#define S3  r8
+@ Note that we avoided r7, r9, and r12 because they are "special"
+@ in various ways. In the following r7 is used for system calls
+@ for example.
 
 	.set	stdin,0
 	.set	stdout,1
 	.set	stderr,2
 
+@ Execute the NEXT codeword. Each word in the dictionary starts with
+@ a so-called codeword: Where should we jump to run this word? If we
+@ are dealing with a word written in assembly, we just jump to that,
+@ the assembly code. But if we are dealing with a word written in FORTH,
+@ we jump to DOCOL, code that knows how to interpret a FORTH word. (You
+@ should really look at Richard's pictures for this.) Note that DOCOL
+@ needs the WORD in T0, that's why we use two registers here.
+
 	.macro NEXT
-@	bl	debug_ping
-	ldr	T0, [NIP], #4		@ load codeword address from NIP, increment
-	@ used to bx T0 here but that apparently was wrong
-	@ still trying to figure out what I misunderstand...
-	ldr	T1, [T0]
-	bx	T1			@ jump to codeword
+	ldr	T0, [NIP], #4	@ load WORD from NIP, increment NIP
+	ldr	T1, [T0]	@ load CODEWORD (offset 0 of WORD)
+	bx	T1		@ jump to CODEWORD
 	.endm
 
+@ We use two stacks, one for return addresses and one for parameters.
+@ The parameter stack coincides with the regular ARM stack, so we can
+@ use PUSH and POP instructions. In line with ARM conventions, we use
+@ full descending stacks (decrement, then store; load, then increment).
+
 	.macro PUSHRSP reg
-	str	\reg, [RSP, #-4]!	@ store register into RSP-4, decrement
+	str	\reg, [RSP, #-4]!	@ store at RSP-4, decrement RSP
 	.endm
 
 	.macro POPRSP reg
-	ldr	\reg, [RSP], #4		@ load register from RSP, increment
+	ldr	\reg, [RSP], #4		@ load from RSP, increment RSP
 	.endm
 
 	.macro PUSHPSP reg
-	str	\reg, [PSP, #-4]!	@ store register into PSP-4, decrement
+	push	{\reg}
 	.endm
 
 	.macro POPPSP reg
-	ldr	\reg, [PSP], #4		@ load register from PSP, increment
+@	push	{T0}
+@	ldr	T0, =var_S0
+@	ldr	T0, [T0]
+@	cmp	T0, PSP
+@	ble	fatal_stack
+@	pop	{T0}
+	pop	{\reg}
 	.endm
 
+@	.text
+@	.align	2
+@fatal_stack:
+@	mov	T0, #stderr
+@	ldr	T1, =stackmsg			@ address
+@	mov	T2, #stackmsgend-stackmsg	@ length
+@	mov	r7, #__NR_write
+@	svc	#0
+@	mov	T0, #-1
+@	mov	r7, #__NR_exit
+@	svc	#0
+
+@	.section .rodata
+@stackmsg:
+@	.ascii "STACK UNDERFLOW\n"
+@stackmsgend:
+
+@ We get here only from NEXT, so T0 is guaranteed to be the WORD we
+@ are supposed to run. We need to skip the codeword at offset 0
+@ though, that points to DOCOL after all!
 
 	.text
 	.align 2
-	@ We get here only from NEXT, so T0 is guaranteed to be the codeword
-	@ for DOCOL itself. WHAT ABOUT INTERPRET AND T0?
 DOCOL:
 	PUSHRSP	NIP		@ push NIP on return stack
-	add	NIP, T0, #4	@ add 4 to codeword to get first dataword, make that the NIP
+	add	NIP, T0, #4	@ skip codeword, make NIP the first dataword
 	NEXT
 
+@ Here comes the entry point. Note that var_S0 is a FORTH variable
+@ that's supposed to hold the "start" of the parameter stack. It's
+@ used in jonesforth.f to implement some fancy stack stuff, but it's
+@ not used here.
 
 	.text
+	.align 2
 	.global _start
 _start:
-	ldr	T0, =var_S0		@ address of var_S0
-	str	PSP, [T0]		@ store initial PSP in var_S0
-	ldr	RSP, =return_stack_top	@ initialize return stack
+	@ store initial PSP in var_S0 FORTH variable
+	ldr	T0, =var_S0
+	str	PSP, [T0]
+	@ initialize the return stack
+	ldr	RSP, =return_stack_top
+	@ initialize data segment (sets var_HERE FORTH variable)
 	bl	set_up_data_segment
-	ldr	NIP, =cold_start	@ initialize interpreter
+	@ initialize the interpreter with a "fake" cold_start WORD
+	ldr	NIP, =cold_start
 	NEXT
 	.pool
 
@@ -189,35 +228,40 @@ name_\label :
 	.pool
 	.global code_\label
 code_\label :
-	stmfd	sp!, {r0-r12,lr}
+	push	{r0-r12,lr}
 	ldr	r0, =name_\label+5	@ address
 	mov	r1, #\namelen		@ length
 	bl	debug_pong
-	ldmfd	sp!, {r0-r12,lr}
+	pop	{r0-r12,lr}
 	@ assembler code follows
 	.endm
 
+	@ DROP (a -- )
 	defcode "DROP",4,,DROP
-	add PSP, PSP, #4	@ POPPSP would load from memory
+	add PSP, PSP, #4	@ POPPSP would load uselessly
 	NEXT
 
-	defcode "SWAP",4,,SWAP
-	POPPSP	T0		@ TODO: avoid unnecessary PSP updates
-	POPPSP	T1
-	PUSHPSP	T0
-	PUSHPSP	T1
+	@ SWAP (a b -- b a)
+	defcode "SWAP",4,,SWAP	@ avoid POP/PUSH macros
+	ldr	T0, [PSP]	@ load from PSP
+	ldr	T1, [PSP, #4]	@ load from PSP+4
+	str	T0, [PSP, #4]	@ store to PSP+4
+	str	T1, [PSP]	@ store to PSP
 	NEXT
 
+	@ DUP (a -- a a)
 	defcode "DUP",3,,DUP
 	ldr	T0, [PSP]	@ POPPSP would require two PUSHPSPs
 	PUSHPSP	T0
 	NEXT
 
+	@ OVER (a b -- a b a)
 	defcode "OVER",4,,OVER
 	ldr	T0, [PSP, #4]
 	PUSHPSP	T0
 	NEXT
 
+	@ ROT (a b c -- b c a)
 	defcode "ROT",3,,ROT
 	POPPSP	T0		@ TODO: avoid unecessary PSP updates
 	POPPSP	T1
@@ -227,6 +271,7 @@ code_\label :
 	PUSHPSP	T2
 	NEXT
 
+	@ -ROT (a b c -- c a b)
 	defcode "-ROT",4,,NROT
 	POPPSP	T0		@ TODO: avoid unecessary PSP updates
 	POPPSP	T1
@@ -244,10 +289,12 @@ code_\label :
 	str	T1, [T0]
 	NEXT
 
+	@ 2DROP (a b -- )
 	defcode "2DROP",5,,TWODROP
 	add	PSP, PSP, #8	@ POPPSP would load from memory
 	NEXT
 
+	@ 2DUP (a b -- a b a b)
 	defcode "2DUP",4,,TWODUP
 	ldr	T0, [PSP]	@ POPPSP would require two PUSHPSPs
 	ldr	T1, [PSP, #4]	@ same
@@ -255,6 +302,7 @@ code_\label :
 	PUSHPSP	T0
 	NEXT
 
+	@ 2SWAP (a b c d -- c d a b)
 	defcode "2SWAP",5,,TWOSWAP
 	POPPSP	T0		@ TODO: avoid unecessary PSP updates
 	POPPSP	T1
@@ -266,36 +314,43 @@ code_\label :
 	PUSHPSP	T2
 	NEXT
 
+	@ ?DUP (0 -- 0)
+	@ ?DUP (a -- a a)
 	defcode "?DUP",4,,QDUP
 	ldr	T0, [PSP]	@ POPPSP would require PUSHPSP
 	cmp	T0, #0		@ != 0?
-	strne	T0, [PSP, #-4]!	@ PUSHPSP is not conditional
+	pushne	{T0}		@ PUSHPSP is not conditional
 	NEXT
 
+	@ 1+ (a -- a+1)
 	defcode "1+",2,,INCR
 	ldr	T0, [PSP]	@ POPPSP would require PUSHPSP
 	add	T0, T0, #1
 	str	T0, [PSP]
 	NEXT
 
+	@ 1- (a -- a-1)
 	defcode "1-",2,,DECR
 	ldr	T0, [PSP]	@ POPPSP would require PUSHPSP
 	sub	T0, T0, #1
 	str	T0, [PSP]
 	NEXT
 
+	@ 4+ (a -- a+4)
 	defcode "4+",2,,INCR4
 	ldr	T0, [PSP]	@ POPPSP would require PUSHPSP
 	add	T0, T0, #4
 	str	T0, [PSP]
 	NEXT
 
+	@ 4- (a -- a-4)
 	defcode "4-",2,,DECR4
 	ldr	T0, [PSP]	@ POPPSP would require PUSHPSP
 	sub	T0, T0, #4
 	str	T0, [PSP]
 	NEXT
 
+	@ + (a b -- a+b)
 	defcode "+",1,,ADD
 	POPPSP	T0		@ TODO: avoid unecessary PSP updates
 	POPPSP	T1
@@ -303,6 +358,7 @@ code_\label :
 	PUSHPSP	T0
 	NEXT
 
+	@ - (a b -- a-b)
 	defcode "-",1,,SUB
 	POPPSP	T0		@ TODO: avoid unecessary PSP updates
 	POPPSP	T1
@@ -310,6 +366,7 @@ code_\label :
 	PUSHPSP	T0
 	NEXT
 
+	@ * (a b -- a*b)
 	defcode "*",1,,MUL
 	POPPSP	T0		@ TODO: avoid unecessary PSP updates
 	POPPSP	T1
@@ -317,48 +374,25 @@ code_\label :
 	PUSHPSP	T0
 	NEXT
 
-
-
+	@ /MOD (a b -- a%b a/b)
 	defcode "/MOD",4,,DIVMOD
-	POPPSP	T0		@ dividend?
-	POPPSP	T1		@ divisor?
+	POPPSP	T1		@ denominator
+	POPPSP	T0		@ numerator
 	bl	_DIVMOD
-	PUSHPSP	T0		@ remainder
-	PUSHPSP	T1		@ quotient
+	PUSHPSP	T3		@ remainder
+	PUSHPSP	T2		@ quotient
 	NEXT
 _DIVMOD:
-	@ DIVMOD (x: T0, y: T1) (q: T0, r: T1)
-	stmfd	sp!, {S0, S1}
-
-	@ check for division by 0
-	cmp	T1, #0		@ y == 0?
-	beq	2f
-	@ check for negative args
-	blt	3f
+	push	{lr}
+	cmp	T1, #0
+	beq	1f
+	blt	2f
 	cmp	T0, #0
-	blt	3f
-
-	mov	S0, T0		@ x
-	mov	S1, T1		@ y
-
-	mov	T2, #0		@ q
-
-	@ subtract T1 from T0 repeatedly
-1:
-	subs	T0, T0, T1	@ x = x - y
-	addpl	T2, T2, #1	@ if x > 0: q = q + 1
-	bpl	1b		@ until x < 0
-
-	@ quotient in T2 now, compute remainder
-	mul	T0, S1, T2	@ T0 = y * q
-	sub	T1, S0, T0	@ r = x - y * q
-
-	@ move quotient
-	mov	T0, T2
-
-	ldmfd	sp!, {S0, S1}
+	blt	2f
+	bl	unsigned_longdiv
+	pop	{lr}
 	bx	lr
-2:
+1:
 	@ division by 0 error
 	mov	T0, #stderr
 	ldr	T1, =divmsg		@ address
@@ -368,9 +402,8 @@ _DIVMOD:
 	mov	T0, #-1
 	mov	r7, #__NR_exit
 	svc	#0
-
-3:
-	@ division by 0 error
+2:
+	@ negative division error
 	mov	T0, #stderr
 	ldr	T1, =posmsg		@ address
 	mov	T2, #posmsgend-posmsg	@ length
@@ -386,120 +419,70 @@ divmsgend:
 posmsg: .ascii "NEGATIVE DIVISION!\n"
 posmsgend:
 
+@ All predicates use 1 for true and 0 for false, unlike the FORTH
+@ standard. That's just as well.
 
-
-@ was /MOD but didn't work as expected, needs more
-@ debugging later
-	defcode "/SOD",4,,SIVMOD
-	POPPSP	T0		@ dividend?
-	POPPSP	T1		@ divisor?
-	bl	_SIVMOD
-	PUSHPSP	T0		@ remainder
-	PUSHPSP	T1		@ quotient
+	@ = (a b -- a=b)
+	defcode "=",1,,EQU
+	POPPSP	T0
+	POPPSP	T1
+	cmp	T1, T0
+	moveq	T0, #1
+	movne	T0, #0
+	PUSHPSP	T0
 	NEXT
-_SIVMOD:
-	@ DIVMOD (x: T0, y: T1) (q: T0, r: T1)
-	stmfd	sp!, {S0, S1}
 
-	@ if signs differ, we need to negate the quotient later
-	eors	S0, T0, T1
-	movmi	S0, #1		@ yes we should negate
-	movpl	S0, #0		@ no we are fine
+	@ <> (a b -- a<>b)
+	defcode "<>",2,,NEQU
+	POPPSP	T0
+	POPPSP	T1
+	cmp	T1, T0
+	movne	T0, #1
+	moveq	T0, #0
+	PUSHPSP	T0
+	NEXT
 
-	@ absolute values for division algorithm
-	cmp	T0, #0
-	rsbmi	T0, T0, #0
-	cmp	T1, #0
-	rsbmi	T1, T1, #0
+	@ < (a b -- a<b)
+	defcode "<",1,,LT
+	POPPSP	T0
+	POPPSP	T1
+	cmp	T1, T0
+	movlt	T0, #1
+	movge	T0, #0
+	PUSHPSP	T0
+	NEXT
 
-	mov	T2, #0		@ quotient q
-	mov	T3, T1		@ remainder r
-	mov	S1, T0		@ old divisor y
+	@ > (a b -- a>b)
+	defcode ">",1,,GT
+	POPPSP	T0
+	POPPSP	T1
+	cmp	T1, T0
+	movgt	T0, #1
+	movle	T0, #0
+	PUSHPSP	T0
+	NEXT
 
-1:	@ shift divisor
-	cmp	T1, T0		@ y <= x
-	movle	T1, T1, LSL #1	@ y = y * 2
-	ble	1b
+	@ <= (a b -- a<=b)
+	defcode "<=",2,,LE
+	POPPSP	T0
+	POPPSP	T1
+	cmp	T1, T0
+	movle	T0, #1
+	movgt	T0, #0
+	PUSHPSP	T0
+	NEXT
 
-2:	@ perform division
-	cmp	T1, S1		@ y != old y
-	beq	3f		@ done
-	mov	T1, T1, LSR #1	@ y = y / 2
-	mov	T2, T2, LSL #1	@ q = q * 2
-	cmp	T3, T1		@ r >= y
-	subge	T3, T3, T1	@ r = r - y
-	addge	T2, T2, #1	@ q = q + 1
-	b	2b
-3:
-	@ now T2 quotient T3 remainder
-	cmp	S0, #0		@ initial signs differed?
-	rsbne	T2, T2, #0	@ negate quotient!
-
-	mov	T0, T2
-	mov	T1, T3
-
-	ldmfd	sp!, {S0, S1}
-	bx	lr
-
-
+	@ >= (a b -- a>=b)
+	defcode ">=",2,,GE
+	POPPSP	T0
+	POPPSP	T1
+	cmp	T1, T0
+	movge	T0, #1
+	movlt	T0, #0
+	PUSHPSP	T0
+	NEXT
 
 @ TODO: register names inconsistent from here on out
-
-	@ use 1 for true and 0 for false!
-
-	defcode "=",1,,EQU
-	POPPSP	r0
-	POPPSP	r1
-	cmp	r0, r1
-	moveq	r0, #1
-	movne	r0, #0
-	PUSHPSP	r0
-	NEXT
-
-	defcode "<>",2,,NEQU
-	POPPSP	r0
-	POPPSP	r1
-	cmp	r0, r1
-	movne	r0, #1
-	moveq	r0, #0
-	PUSHPSP	r0
-	NEXT
-
-	defcode "<",1,,LT
-	POPPSP	r0
-	POPPSP	r1
-	cmp	r0, r1
-	movlt	r0, #1
-	movge	r0, #0
-	PUSHPSP	r0
-	NEXT
-
-	defcode ">",1,,GT
-	POPPSP	r0
-	POPPSP	r1
-	cmp	r0, r1
-	movgt	r0, #1
-	movle	r0, #0
-	PUSHPSP	r0
-	NEXT
-
-	defcode "<=",2,,LE
-	POPPSP	r0
-	POPPSP	r1
-	cmp	r0, r1
-	movle	r0, #1
-	movge	r0, #0
-	PUSHPSP	r0
-	NEXT
-
-	defcode ">=",2,,GE
-	POPPSP	r0
-	POPPSP	r1
-	cmp	r0, r1
-	movge	r0, #1
-	movlt	r0, #0
-	PUSHPSP	r0
-	NEXT
 
 	defcode "0=",2,,ZEQU
 	POPPSP	r0
@@ -582,7 +565,8 @@ _SIVMOD:
 	NEXT
 
 	defcode "LIT",3,,LIT
-	ldr	T0, [NIP], #4	@ grab and skip literal value
+	ldr	T0, [NIP], #4	@ load WORD from NIP, increment NIP
+				@ which grabbed and skipped the literal
 	PUSHPSP	T0		@ push it
 	NEXT
 
@@ -738,18 +722,18 @@ var_\name :
 	NEXT
 _KEY:
 	@ KEY () (char: T0)
-	stmfd	sp!, {S2,S3}
+	push	{U2,U3}
 3:
-	ldr	S3, =currkey		@ address of currkey
-	ldr	T3, [S3]		@ value of currkey (address in buffer)
-	ldr	S2, =bufftop		@ address of bufftop
-	ldr	T2, [S2]		@ value of bufftop (address in buffer)
+	ldr	U3, =currkey		@ address of currkey
+	ldr	T3, [U3]		@ value of currkey (address in buffer)
+	ldr	U2, =bufftop		@ address of bufftop
+	ldr	T2, [U2]		@ value of bufftop (address in buffer)
 	cmp	T3, T2			@ currkey >= bufftop?
 	bge	1f			@ yes, need more input
 	ldrb	T0, [T3], #1		@ load character and increment currkey
-	str	T3, [S3]		@ update currkey
+	str	T3, [U3]		@ update currkey
 
-	ldmfd	sp!, {S2,S3}
+	pop	{U2,U3}
 	bx	lr			@ return
 1:
 	mov	r7, #__NR_read
@@ -760,9 +744,9 @@ _KEY:
 	cmp	T0, #0			@ <= 0?
 	ble	2f			@ yes, fatal error
 	ldr	T1, =buffer
-	str	T1, [S3]		@ reset currkey (to beginning of buffer)
+	str	T1, [U3]		@ reset currkey (to beginning of buffer)
 	add	T1, T1, T0
-	str	T1, [S2]		@ update bufftop (with length we read)
+	str	T1, [U2]		@ update bufftop (with length we read)
 	b	3b			@ try fast path again
 2:
 	mov	r7, #__NR_exit
@@ -802,7 +786,7 @@ emit_scratch:
 	NEXT
 _WORD:
 	@ WORD () (address: T0, length: T1)
-	stmfd	sp!, {S0,lr}
+	push	{U0,lr}
 1:
 	bl	_KEY
 	cmp	T0, #'\\'		@ == \?
@@ -810,17 +794,17 @@ _WORD:
 	cmp	T0, #' '		@ <= ' '?
 	ble	1b			@ keep looking
 
-	ldr	S0, =word_buffer	@ address
+	ldr	U0, =word_buffer	@ address
 2:
-	strb	T0, [S0], #1		@ store character, increment pointer
+	strb	T0, [U0], #1		@ store character, increment pointer
 	bl	_KEY
 	cmp	T0, #' '		@ > ' '?
 	bgt	2b			@ keep looking
 
 	ldr	T0, =word_buffer	@ address
-	sub	T1, S0, T0		@ length
+	sub	T1, U0, T0		@ length
 
-	ldmfd	sp!, {S0,lr}
+	pop	{U0,lr}
 	bx	lr
 3:
 	bl	_KEY
@@ -841,54 +825,53 @@ word_buffer:
 	PUSHPSP	T0		@ number
 	PUSHPSP	T1		@ # unparsed
 	NEXT
-
 _NUMBER:
 	@ NUMBER(address: T0, length: T1) (number: T0, unparsed: T1)
-	stmfd	sp!, {S0,S1,S2,S3}
+	push	{U0,U1,U2,U3,lr}
 
 	mov	T2, T0		@ address
 	mov	T0, #0		@ number
 	cmp	T1, #0		@ length <= 0?
 	ble	5f		@ really an error, but returns 0 anyway
 
-	ldr	S0, =var_BASE
-	ldr	S0, [S0]	@ get BASE
-	ldrb	S1, [T2], #1	@ get character and increment address
-	mov	S3, #0		@ set negative flag false
-	cmp	S1, #'-'	@ leading '-'?
+	ldr	U0, =var_BASE
+	ldr	U0, [U0]	@ get BASE
+	ldrb	U1, [T2], #1	@ get character and increment address
+	mov	U3, #0		@ set negative flag false
+	cmp	U1, #'-'	@ leading '-'?
 	bne	2f		@ nope, try to parse as digit
 
-	mov	S3, #1		@ set negative flag true
+	mov	U3, #1		@ set negative flag true
 	subs	T1, T1, #1	@ decrement length
 	bpl	1f		@ >0 so keep going
 
 	mov	T1, #1		@ just a sign, no digits, signal an error
 	b	5f		@ error!
 1:
-	mul	S2, T0, S0	@ number = number * BASE
-	mov	T0, S2		@ (need to use another register for mul to avoid warning)
-	ldrb	S1, [T2], #1	@ get character and increment address
+	mul	U2, T0, U0	@ number = number * BASE
+	mov	T0, U2		@ (need to use another register for mul to avoid warning)
+	ldrb	U1, [T2], #1	@ get character and increment address
 2:
-	subs	S1, S1, #'0'	@ try lower digit bound
+	subs	U1, U1, #'0'	@ try lower digit bound
 	bmi	4f		@ nope, < '0' so we're done
-	cmp	S1, #10		@ try upper digit bound
+	cmp	U1, #10		@ try upper digit bound
 	blt	3f		@ yes, we got one!
-	subs	S1, S1, #17	@ try lower char bound (17 is 'A'-'0')
+	subs	U1, U1, #17	@ try lower char bound (17 is 'A'-'0')
 	bmi	4f		@ nope, < 'A' so we're done
-	add	S1, S1, #10	@ adjust for first 10 digit values before 'A'
+	add	U1, U1, #10	@ adjust for first 10 digit values before 'A'
 3:
-	cmp	S1, S0		@ >= BASE?
+	cmp	U1, U0		@ >= BASE?
 	bge	4f		@ yep, we're done
 
 	@ finally, add new digit to number and loop
-	add	T0, S1
+	add	T0, U1
 	subs	T1, T1, #1
 	bne	1b
 4:
-	cmp	S3, #1		@ check negative flag
+	cmp	U3, #1		@ check negative flag
 	rsbeq	T0, T0, #0	@ yes, negate (r0 = 0 - r0)
 5:
-	ldmfd	sp!, {S0,S1,S2,S3}
+	pop	{U0,U1,U2,U3,lr}
 	bx	lr
 
 
@@ -899,12 +882,11 @@ _NUMBER:
 	POPPSP	T1			@ length of string
 	POPPSP	T0			@ address of string
 	bl	_FIND
-	PUSHPSP	T0			@ address of dictionary entry
+	PUSHPSP	T0			@ address of dictionary entry (or 0)
 	NEXT
-
 _FIND:
 	@ FIND (address: T0, length: T1) (address: T0)
-	stmfd	sp!, {S0,S1,S2,S3}
+	push	{U0,U1,U2,U3,lr}
 
 	mov	T2, T1			@ length
 	mov	T1, T0			@ address
@@ -916,18 +898,18 @@ _FIND:
 
 	ldrb	T3, [T0, #4]		@ flags+length field
 	and	T3, T3, #(F_HIDDEN|F_LENMASK)
-	cmp	T2, T2			@ length the same?
+	cmp	T3, T2			@ length the same? HUGE BUG T2, T2!!!
 	bne	2f			@ nope, skip this entry
 
 	@ T2 = T3, but T3 can be destroyed in the loop
 
-	mov	S0, T1			@ current char in string A
-	mov	S1, T0
-	add	S1, S1, #5		@ current char in string B
+	mov	U0, T1			@ current char in string A
+	mov	U1, T0
+	add	U1, U1, #5		@ current char in string B
 10:
-	ldrb 	S2, [S0], #1		@ char A, increment
-	ldrb	S3, [S1], #1		@ char B, increment
-	cmp	S2, S3			@ A = B?
+	ldrb 	U2, [U0], #1		@ char A, increment
+	ldrb	U3, [U1], #1		@ char B, increment
+	cmp	U2, U3			@ A = B?
 	bne	2f			@ nope
 	subs	T3, T3, #1		@ decrement
 	bne	10b			@ > 0, keep going
@@ -938,7 +920,7 @@ _FIND:
 	ldr	T0, [T0]		@ previous dictionary pointer
 	b	1b			@ try again
 4:
-	ldmfd   sp!, {S0,S1,S2,S3}
+	pop	{U0,U1,U2,U3,lr}
 	bx	lr
 
 
@@ -1113,31 +1095,31 @@ _TELL:
 
 
 	defcode "INTERPRET",9,,INTERPRET
-	mov	S3, #0			@ reset interpret_is_lit flag
+	mov	U3, #0			@ reset interpret_is_lit flag
 
 	bl	_WORD			@ returns T0 = address, T1 = length
-	mov	S0, T0			@ address
-	mov	S1, T1			@ length
+	mov	U0, T0			@ address
+	mov	U1, T1			@ length
 	bl	_FIND			@ returns T0 = dictionary entry
 	cmp	T0, #0			@ = NULL?
 	beq	1f			@ not found!
 
 	@ found in dictionary, check if it's immediate
-	ldrb	S2, [T0, #4]		@ load length/flags byte
+	ldrb	U2, [T0, #4]		@ load length/flags byte
 	bl	_TCFA			@ returns T0 = codeword pointer 
-	tst	S2, #F_IMMED		@ test immediate flag
+	tst	U2, #F_IMMED		@ test immediate flag
 	bne	4f			@ jump straight to execute!
 	b	2f			@ jump to compile/execute?
 
 1:	@ not in dictionary, check if it's a number
-	add	S3, S3, #1		@ set interpret_is_lit flag
-	mov	T0, S0			@ address
-	mov	T1, S1			@ length
+	add	U3, U3, #1		@ set interpret_is_lit flag
+	mov	T0, U0			@ address
+	mov	T1, U1			@ length
 	bl	_NUMBER			@ returns T0 = number, T1 = unparsed
 	cmp	T1, #0			@ unparsed > 0?
 	bne	6f			@ error!
 
-	mov	S2, T0			@ number
+	mov	U2, T0			@ number
 	ldr	T0, =LIT		@ codeword is LIT
 
 2:	@ compiling or executing?
@@ -1148,17 +1130,17 @@ _TELL:
 
 	@ compiling, append word to current dictionary definition
 	bl	_COMMA			@ expects codeword in T0
-	cmp	S3, #0			@ interpret_is_lit == 0?
+	cmp	U3, #0			@ interpret_is_lit == 0?
 	beq	3f			@ yep, so we're done
 
-	mov	T0, S2			@ number
+	mov	T0, U2			@ number
 	bl	_COMMA			@ expects codeword in T0
 3:
 	NEXT
 
 
 4:	@ executing, so run the word
-	cmp	S3, #0			@ interpret_is_lit != 0?
+	cmp	U3, #0			@ interpret_is_lit != 0?
 	bne	5f			@ yep, so let's push
 
 	@ not a literal, execute! never returns, but eventually NEXT will get
@@ -1167,7 +1149,7 @@ _TELL:
 	bx	T1
 
 5:	@ execute literal, which means push it
-	PUSHPSP	S2
+	PUSHPSP	U2
 	NEXT
 
 6:
@@ -1185,7 +1167,7 @@ _TELL:
 	sub	T2, T1, T2		@ length = currkey - buffer
 	cmp	T2, #40			@ > 40?
 	movgt	T2, #40			@ cap at 40
-	sub	T1, T1, T2		@ ??????
+	sub	T1, T1, T2		@ buffer_to_print = currkey - capped_length
 	mov	r7, #__NR_write
 	svc	#0
 
@@ -1286,8 +1268,8 @@ debugend:
 @ use DONG word to toggle ON/OFF
 	.text
 debug_pong:
-	mov	S0, T0
-	mov	S1, T1
+	mov	U0, T0
+	mov	U1, T1
 
 	ldr	T0, =var_PONG
 	ldr	T0, [T0]
@@ -1301,8 +1283,8 @@ debug_pong:
 	svc	#0
 
 	mov	T0, #stderr
-	mov	T1, S0
-	mov	T2, S1
+	mov	T1, U0
+	mov	T2, U1
 	mov	r7, #__NR_write
 	svc	#0
 
@@ -1334,3 +1316,31 @@ buffer:
 	.align	12
 data_segment:
 	.space	INITIAL_DATA_SEGMENT_SIZE
+
+	.text
+	.align 2
+@ from http://thinkingeek.com/2013/08/11/arm-assembler-raspberry-pi-chapter-15/
+unsigned_longdiv:
+    /* r0 contains N */
+    /* r1 contains D */
+    /* r2 contains Q */
+    /* r3 contains R */
+    push {r4, lr}
+    mov r2, #0                 /* r2 ← 0 */
+    mov r3, #0                 /* r3 ← 0 */
+
+    mov r4, #32                /* r4 ← 32 */
+    b .Lloop_check1
+    .Lloop1:
+        movs r0, r0, LSL #1    /* r0 ← r0 << 1 updating cpsr (sets C if 31st bit of r0 was 1) */
+        adc r3, r3, r3         /* r3 ← r3 + r3 + C. This is equivalent to r3 ← (r3 << 1) + C */
+
+        cmp r3, r1             /* compute r3 - r1 and update cpsr */
+        subhs r3, r3, r1       /* if r3 >= r1 (C=1) then r3 ← r3 - r1 */
+        adc r2, r2, r2         /* r2 ← r2 + r2 + C. This is equivalent to r2 ← (r2 << 1) + C */
+    .Lloop_check1:
+        subs r4, r4, #1        /* r4 ← r4 - 1 */
+        bpl .Lloop1            /* if r4 >= 0 (N=0) then branch to .Lloop1 */
+
+    pop {r4, lr}
+    bx lr
