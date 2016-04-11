@@ -1,4 +1,4 @@
-# Porting Richard Jones' FORTH to ARM
+# JONESFORTH/arm: Porting Richard Jones' FORTH to ARM
 
 Back in 2010 I started porting an x86 FORTH to ARM, mostly to learn ARM
 assembly. Sadly I never finished the port, I stopped when I felt I had
@@ -11,6 +11,31 @@ have made an appearance on github.com:
 
 - https://github.com/M2IHP13-admin/JonesForth-arm
 - https://github.com/organix/pijFORTHos
+
+I am currently still in the process of cleaning things up, but most of
+the original JONESFORTH words now seem to work. (I'll rewrite this one
+more time when I am satisfied enough with the code, until then there's
+no real README just this mess.)
+
+## License
+
+Since the original JONESFORTH is in the Public Domain, I figured I should
+also put my JONESFORTH/arm port into the Public Domain. And to make sure
+that works out (with all the appropriate legalese that's way beyond me),
+I decided to go for this:
+
+> [![CC0](http://i.creativecommons.org/p/zero/1.0/88x31.png)](http://creativecommons.org/publicdomain/zero/1.0/)
+>
+> To the extent possible under law,
+> [Peter H. Froehlich](https://github.com/phf/)
+> has waived all copyright and related or neighboring rights to
+> [JONESFORTH/arm](https://github.com/phf/forth).
+> This work is published from: United States.
+
+Obviously this only applies to code I have written, so the code in the
+`arm/` directory of the repository. It doesn't apply to the other code
+I keep around for reference, check each of those directories for their
+respective license.
 
 ## Original README (2010)
 

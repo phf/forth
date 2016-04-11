@@ -1,13 +1,11 @@
-@ armforth.S - Porting Richard Jones' FORTH to ARM
+@ JONESFORTH/arm: Porting Richard Jones' FORTH to ARM
 @
-@ Copyright (c) 2010, 2016 by Peter H. Froehlich <phf@acm.org>
-@ All right reserved.
+@ Hacked in 2010, 2016 by Peter H. Froehlich.
 @
-@ Please read Richard's original version if you want
-@ the whole tutorial about FORTH. I'll just mention
-@ some ARM related stuff here.
+@ JONESFORTH/arm is in the Public Domain, see README.md for all the details.
 @
-@ Eventually there will be some kind of license here.
+@ Please read Richard's original version if you want the whole tutorial on
+@ FORTH internals. I'll just cover some ARM-related stuff in the following.
 
 	.set JONES_VERSION,47
 	.set ARM_VERSION,0
@@ -594,10 +592,8 @@ posmsgend:
 
 	.macro defvar name, namelen, flags=0, label, initial=0
 	defcode \name,\namelen,\flags,\label
-	ldr	r0, =var_\name	@ load address
-	@ used to ldr r0, [r0] here but we should only push
-	@ the ADDRESS for a variable...
-	PUSHPSP	r0		@ push address
+	ldr	T0, =var_\name	@ load address
+	PUSHPSP	T0		@ push address
 	NEXT
 	.data
 	.align 2
@@ -612,7 +608,6 @@ var_\name :
 	defvar "BASE",4,,BASE,10
 @ for debugging
 	defvar	"PONG",4,,PONG
-
 
 	.macro defconst name, namelen, flags=0, label, value
 	defcode \name,\namelen,\flags,\label
@@ -677,7 +672,6 @@ var_\name :
 	mov	PSP, r0
 	NEXT
 
-
 	defcode "KEY",3,,KEY
 	bl	_KEY
 	PUSHPSP	T0
@@ -721,7 +715,6 @@ currkey:
 bufftop:
 	.int buffer		// Last valid data in input buffer + 1.
 
-
 	defcode "EMIT",4,,EMIT
 	POPPSP	T0
 	bl	_EMIT
@@ -739,7 +732,6 @@ _EMIT:
 	.data
 emit_scratch:
 	.space 1
-
 
 	defcode "WORD",4,,WORD
 	bl _WORD
@@ -777,8 +769,6 @@ _WORD:
 	.data
 word_buffer:
 	.space 32
-
-
 
 	defcode "NUMBER",6,,NUMBER
 	POPPSP	T1		@ length of string
@@ -835,10 +825,6 @@ _NUMBER:
 5:
 	pop	{U0,U1,U2,U3,lr}
 	bx	lr
-
-
-
-
 
 	defcode "FIND",4,,FIND
 	POPPSP	T1			@ length of string
