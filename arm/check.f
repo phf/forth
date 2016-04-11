@@ -2,14 +2,14 @@
 
 \ Test DROP SWAP DUP OVER hacks.
 42 43 DROP EMIT
-42 43 SWAP EMIT 1- EMIT
+42 43 SWAP EMIT 1 - EMIT
 21 DUP + EMIT
 1 42 3 OVER EMIT
 
 \ Test ROT and -ROT hacks.
-41 42 43 1- EMIT EMIT 1+ EMIT
-41 42 43 ROT 1+ EMIT 1- EMIT EMIT
-41 42 43 -ROT EMIT 1+ EMIT 1- EMIT
+41 42 43 1 - EMIT EMIT 1 + EMIT
+41 42 43 ROT 1 + EMIT 1 -  EMIT EMIT
+41 42 43 -ROT EMIT 1 + EMIT 1 - EMIT
 
 \ Test 2DROP 2DUP 2SWAP hacks.
 42 41 43 2DROP EMIT
@@ -21,10 +21,11 @@
 42 0 ?DUP DROP EMIT
 
 \ Test 1+ 1- 4+ 4- hacks.
-41 1+ EMIT
-43 1- EMIT
-38 4+ EMIT
-46 4- EMIT
+\ Commented out since they are no longer primitive.
+\41 1+ EMIT
+\43 1- EMIT
+\38 4+ EMIT
+\46 4- EMIT
 
 \ Test + - * hacks.
 41 1 + EMIT

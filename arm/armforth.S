@@ -355,34 +355,6 @@ code_\label :
 	pushne	{T0}		@ PUSHPSP is not conditional
 	NEXT
 
-	@ 1+ (a -- a+1)
-	defcode "1+",2,,INCR
-	ldr	T0, [PSP]	@ POPPSP would require PUSHPSP
-	add	T0, T0, #1
-	str	T0, [PSP]
-	NEXT
-
-	@ 1- (a -- a-1)
-	defcode "1-",2,,DECR
-	ldr	T0, [PSP]	@ POPPSP would require PUSHPSP
-	sub	T0, T0, #1
-	str	T0, [PSP]
-	NEXT
-
-	@ 4+ (a -- a+4)
-	defcode "4+",2,,INCR4
-	ldr	T0, [PSP]	@ POPPSP would require PUSHPSP
-	add	T0, T0, #4
-	str	T0, [PSP]
-	NEXT
-
-	@ 4- (a -- a-4)
-	defcode "4-",2,,DECR4
-	ldr	T0, [PSP]	@ POPPSP would require PUSHPSP
-	sub	T0, T0, #4
-	str	T0, [PSP]
-	NEXT
-
 	@ + (a b -- a+b)
 	defcode "+",1,,ADD
 	POPPSP	T0		@ TODO: avoid unecessary PSP updates
@@ -913,10 +885,6 @@ _FIND:
 	pop	{U0,U1,U2,U3,lr}
 	bx	lr
 
-
-
-
-
 	defcode ">CFA",4,,TCFA
 	POPPSP	T0
 	bl	_TCFA
@@ -932,14 +900,6 @@ _TCFA:
 	add	T0, T0, #3		@ align to 4-byte boundary
 	and	T0, T0, #~3
 	bx	lr
-
-
-
-	defword ">DFA",4,,TDFA
-	.int TCFA		// >CFA		(get code field address)
-	.int INCR4		// 4+		(add 4 to it to get to next word)
-	.int EXIT		// EXIT		(return from FORTH word)
-
 
 	defcode "CREATE",6,,CREATE
 	@ TODO: shouldn't this ensure length > 0?
@@ -970,7 +930,6 @@ _TCFA:
 	str	r3, [r2]	@ update HERE
 	NEXT
 
-
 	defcode ",",1,,COMMA
 	POPPSP	T0
 	bl	_COMMA
@@ -983,7 +942,6 @@ _COMMA:
 	str	r2, [r1]	@ update HERE
 	bx	lr
 
-
 	defcode "[",1,F_IMMED,LBRAC
 	ldr	r0, =var_STATE	@ address of STATE
 	mov	r1, #0
@@ -995,7 +953,6 @@ _COMMA:
 	mov	r1, #1
 	str	r1, [r0]	@ update STATE
 	NEXT
-
 
 	defword ":",1,,COLON
 	.int WORD		// Get the name of the new word
@@ -1010,7 +967,6 @@ _COMMA:
 	.int LATEST, FETCH, HIDDEN // Toggle hidden flag -- unhide the word (see below for definition).
 	.int LBRAC		// Go back to IMMEDIATE mode.
 	.int EXIT		// Return from the function.
-
 
 	defcode "IMMEDIATE",9,F_IMMED,IMMEDIATE
 	ldr	r0, =var_LATEST		@ address of LATEST
@@ -1027,18 +983,10 @@ _COMMA:
 	strb	r1, [r0, #4]		@ update length/flag byte
 	NEXT
 
-	defword "HIDE",4,,HIDE
-	.int WORD		// Get the word (after HIDE).
-	.int FIND		// Look up in the dictionary.
-	.int HIDDEN		// Set F_HIDDEN flag.
-	.int EXIT		// Return.
-
-
 	defcode "'",1,,TICK
 	ldr	r0, [NIP], #4	@ load address of next word from NIP, increment NIP to skip it
 	PUSHPSP	r0
 	NEXT
-
 
 	defcode "BRANCH",6,,BRANCH
 	ldr	r0, [NIP]	@ offset to add
@@ -1051,7 +999,6 @@ _COMMA:
 	beq	code_BRANCH	@ yes, do the branch
 	add	NIP, NIP, #4	@ no, skip the offset
 	NEXT
-
 
 	defcode "LITSTRING",9,,LITSTRING
 	ldr	r0, [NIP], #4	@ get length of string, increment
@@ -1079,10 +1026,6 @@ _TELL:
 	.int RZ,RSPSTORE	// R0 RSP!, clear the return stack
 	.int INTERPRET		// interpret the next word
 	.int BRANCH,-8		// and loop (indefinitely)
-
-
-
-
 
 	defcode "INTERPRET",9,,INTERPRET
 	mov	U3, #0			@ reset interpret_is_lit flag
@@ -1128,7 +1071,6 @@ _TELL:
 3:
 	NEXT
 
-
 4:	@ executing, so run the word
 	cmp	U3, #0			@ interpret_is_lit != 0?
 	bne	5f			@ yep, so let's push
@@ -1173,18 +1115,15 @@ errmsg: .ascii "PARSE ERROR: "
 errmsgend:
 errmsgnl: .ascii "\n"
 
-
 	defcode "CHAR",4,,CHAR
 	bl	_WORD			@ returns T0 = address, T1 = length
 	ldrb	T0, [T0]		@ get first character
 	PUSHPSP	T0			@ push it
 	NEXT
 
-
 	defcode "EXECUTE",7,,EXECUTE
 	POPPSP	T0			@ grab execution token, whatever that is?
 	bx	T0			@ jump to it (execution token's NEXT will continue)
-
 
 	defcode "SYSCALL3",8,,SYSCALL3
 	POPPSP	r7		@ syscall number
@@ -1215,7 +1154,6 @@ errmsgnl: .ascii "\n"
 	svc	#0
 	PUSHPSP	r0		@ result
 	NEXT
-
 
 @ very basic debugging helper
 	.text
@@ -1271,7 +1209,6 @@ debug_pong:
 rmsg: .ascii "PONG: "
 rmsgend:
 rmsgnl: .ascii "\n"
-
 
 	.text
 	.align 2
