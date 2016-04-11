@@ -484,54 +484,6 @@ posmsgend:
 
 @ TODO: register names inconsistent from here on out
 
-	defcode "0=",2,,ZEQU
-	POPPSP	r0
-	cmp	r0, #0
-	moveq	r0, #1
-	movne	r0, #0
-	PUSHPSP	r0
-	NEXT
-
-	defcode "0<>",3,,ZNEQU
-	POPPSP	r0
-	cmp	r0, #0
-	movne	r0, #1
-	moveq	r0, #0
-	PUSHPSP	r0
-	NEXT
-
-	defcode "0<",2,,ZLT
-	POPPSP	r0
-	cmp	r0, #0
-	movlt	r0, #1
-	movge	r0, #0
-	PUSHPSP	r0
-	NEXT
-
-	defcode "0>",2,,ZGT
-	POPPSP	r0
-	cmp	r0, #0
-	movgt	r0, #1
-	movle	r0, #0
-	PUSHPSP	r0
-	NEXT
-
-	defcode "0<=",3,,ZLE
-	POPPSP	r0
-	cmp	r0, #0
-	movle	r0, #1
-	movgt	r0, #0
-	PUSHPSP	r0
-	NEXT
-
-	defcode "0>=",3,,ZGE
-	POPPSP	r0
-	cmp	r0, #0
-	movge	r0, #1
-	movlt	r0, #0
-	PUSHPSP	r0
-	NEXT
-
 	defcode "AND",3,,AND
 	POPPSP	r0
 	POPPSP	r1

@@ -7,7 +7,7 @@ hello:
 	gcc -nostdlib -static -Wl,--build-id=none -o hello hello.S
 
 run:
-	cat ../x86/jonesforth.f - | ./armforth
+	cat patch.f ../x86/jonesforth.f - | ./armforth
 
 check:
 	cat check.f | ./armforth
