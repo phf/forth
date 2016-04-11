@@ -66,6 +66,12 @@
 1 INVERT 1 AND 42 + EMIT
 213 INVERT EMIT
 
+\ Check @ and ! hacks.
+BASE @ 32 + EMIT
+BASE @ \ remember old base
+31 11 BASE ! BASE @ + EMIT
+BASE ! \ restore old base
+
 \ Marker up to where I am working right now.
 124 EMIT
 
