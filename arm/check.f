@@ -51,6 +51,20 @@
 52 52 >= 41 + EMIT
 53 52 >= 41 + EMIT
 
+\ Check AND OR XOR INVERT hacks. (bitwise)
+1 0 AND 42 + EMIT
+1 1 AND 41 + EMIT
+234 63 AND EMIT
+1 0 OR 41 + EMIT
+0 0 OR 42 + EMIT
+32 10 OR EMIT
+1 0 XOR 41 + EMIT
+1 1 XOR 42 + EMIT
+226 200 XOR EMIT
+0 INVERT 1 AND 41 + EMIT
+1 INVERT 1 AND 42 + EMIT
+213 INVERT EMIT
+
 \ Marker up to where I am working right now.
 124 EMIT
 

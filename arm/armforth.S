@@ -12,6 +12,10 @@
 	.set JONES_VERSION,47
 	.set ARM_VERSION,0
 
+	.set INITIAL_DATA_SEGMENT_SIZE,65536
+	.set RETURN_STACK_SIZE,8192
+	.set BUFFER_SIZE,4096
+
 @ ARM ABI conventions
 @ ===================
 @
@@ -182,12 +186,41 @@ _start:
 	@ initialize the interpreter with a "fake" cold_start WORD
 	ldr	NIP, =cold_start
 	NEXT
+
+@ Note that jonesforth.f has the code to grow the data segment on
+@ demand.
+set_up_data_segment:
+	@ TODO: error checking? maybe?
+	mov	r0, #0
+	mov	r7, #__NR_brk
+	svc	#0
+
+	ldr	r1, =var_HERE
+	str	r0, [r1]
+
+	add	r0, r0, #INITIAL_DATA_SEGMENT_SIZE
+	mov	r7, #__NR_brk
+	svc	#0
+
+	bx	lr
+
 	.pool
 
 	.section .rodata
 cold_start:
 	.int QUIT
 
+	.bss
+	.align 12
+return_stack:
+	.space RETURN_STACK_SIZE
+return_stack_top:
+
+	.align 12
+buffer:
+	.space BUFFER_SIZE
+
+@ Now we start defining FORTH words.
 
 	.set F_IMMED,0x80
 	.set F_HIDDEN,0x20
@@ -482,35 +515,40 @@ posmsgend:
 	PUSHPSP	T0
 	NEXT
 
-@ TODO: register names inconsistent from here on out
+@ The following are BITWISE operations, not LOGICAL or BOOLEAN ones.
 
+	@ AND (a b -- a&b)
 	defcode "AND",3,,AND
-	POPPSP	r0
-	POPPSP	r1
-	and	r0, r1, r0
-	PUSHPSP	r0
+	POPPSP	T0
+	POPPSP	T1
+	and	T0, T1, T0
+	PUSHPSP	T0
 	NEXT
 
+	@ OR (a b -- a|b)
 	defcode "OR",2,,OR
-	POPPSP	r0
-	POPPSP	r1
-	orr	r0, r1, r0
-	PUSHPSP	r0
+	POPPSP	T0
+	POPPSP	T1
+	orr	T0, T1, T0
+	PUSHPSP	T0
 	NEXT
 
+	@ XOR (a b -- a^b)
 	defcode "XOR",3,,XOR
-	POPPSP	r0
-	POPPSP	r1
-	eor	r0, r1, r0
-	PUSHPSP	r0
+	POPPSP	T0
+	POPPSP	T1
+	eor	T0, T1, T0
+	PUSHPSP	T0
 	NEXT
 
+	@ INVERT (a -- ~a)
 	defcode "INVERT",6,,INVERT
-	ldr	r0, [PSP]
-	mvn	r0, r0
-	str	r0, [PSP]
+	ldr	T0, [PSP]
+	mvn	T0, T0
+	str	T0, [PSP]
 	NEXT
 
+@ TODO: register names inconsistent from here on out
 
 	defcode "EXIT",4,,EXIT
 	POPRSP	NIP
@@ -1178,25 +1216,6 @@ errmsgnl: .ascii "\n"
 	PUSHPSP	r0		@ result
 	NEXT
 
-	.text
-	.set INITIAL_DATA_SEGMENT_SIZE,65536
-set_up_data_segment:
-@ current setup for debugging
-	ldr	r0, =data_segment
-	ldr	r1, =var_HERE
-	str	r0, [r1]
-	bx	lr
-@ original code to make data segment extensible
-@	mov	r0, #0
-@	svc	__NR_brk
-@	ldr	r1, =var_HERE
-@	str	r0, [r1]
-@	add	r0, r0, #INITIAL_DATA_SEGMENT_SIZE
-@	svc	__NR_brk
-@	bx	lr
-
-	.set RETURN_STACK_SIZE,8192
-	.set BUFFER_SIZE,4096
 
 @ very basic debugging helper
 	.text
@@ -1253,21 +1272,6 @@ rmsg: .ascii "PONG: "
 rmsgend:
 rmsgnl: .ascii "\n"
 
-
-	.bss
-	.align 12
-return_stack:
-	.space RETURN_STACK_SIZE
-return_stack_top:
-
-	.align 12
-buffer:
-	.space BUFFER_SIZE
-
-@ current setup for debugging, not extensible
-	.align	12
-data_segment:
-	.space	INITIAL_DATA_SEGMENT_SIZE
 
 	.text
 	.align 2
