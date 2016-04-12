@@ -72,6 +72,11 @@ BASE @ \ remember old base
 31 11 BASE ! BASE @ + EMIT
 BASE ! \ restore old base
 
+\ Check +! and -! hacks.
+32
+32 BASE +! BASE @ EMIT
+BASE -! BASE @ 32 + EMIT
+
 \ Marker up to where I am working right now.
 124 EMIT
 
@@ -92,3 +97,6 @@ STAR
 
 \ Try those two.
 10 QUADRUPLE 2 + EMIT
+
+\ End by writing a newline.
+10 EMIT
