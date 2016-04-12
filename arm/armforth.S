@@ -49,30 +49,37 @@
 @ course if they are "special". Registers a1-a4 and lr
 @ seem to be caller-saved by implication.
 @
-@ Assembly
-@ ========
-@
+@ ARM Notes
+@ =========
 @ .align for x86 is bytes, for ARM it's powers of two
 @
 @ SUB a, b, c <=> a = b - c
 @ RSB a, b, c <=> a = c - b
 @
-@ CMP a, b <=> flags for a - b
+@ CMP a, b <=> flags (only!) for a - b
+@ SUBS a, b, c <=> a = b - c (and flags!)
 @
 @ LDR a, [b, #c]  <=> a = M[b + #c]
 @ LDR a, [b, #c]! <=> a = M[b + #c], b = b + #c
 @ LDR a, [b], #c  <=> a = M[b], b = b + #c
 @
-@ FORTH
-@ =====
+@ PUSH	{r3, r11} <=> puts r3 on top, r11 under r3, by register number
+@ PUSH is STMDB, POP is LDMIA
+@
+@ FORTH Notes
+@ ===========
 @       pre      post
 @       vvvvv    vvv
 @ WORD (a b c -- d e)
 @           ^      ^
 @          top    top
 @
-@	WORD expects c on top, then b, then a
-@	WORD leaves e on top, then d
+@	WORD expects c on top, then b below c, then a below b
+@	WORD leaves e on top, then d below e
+@
+@ TODO
+@ ====
+@ - add STACK?/ABORT to INTERPRET? some other kind of STACK checking?
 
 #include <asm/unistd.h>
 
@@ -128,31 +135,29 @@ U3	.req	r8
 	.endm
 
 	.macro POPPSP reg
-@	push	{T0}
-@	ldr	T0, =var_S0
-@	ldr	T0, [T0]
-@	cmp	T0, PSP
-@	ble	fatal_stack
-@	pop	{T0}
 	pop	{\reg}
 	.endm
 
-@	.text
-@	.align	2
-@fatal_stack:
-@	mov	T0, #stderr
-@	ldr	T1, =stackmsg			@ address
-@	mov	T2, #stackmsgend-stackmsg	@ length
-@	mov	r7, #__NR_write
-@	svc	#0
-@	mov	T0, #-1
-@	mov	r7, #__NR_exit
-@	svc	#0
+@ New stack macros using ldm/stm/push/pop for register lists. These
+@ are not yet used everywhere, but they make some words shorter and
+@ presumably faster. I am hoping to fiddle them in everywhere sooner
+@ or later. TODO: update more words to use these
 
-@	.section .rodata
-@stackmsg:
-@	.ascii "STACK UNDERFLOW\n"
-@stackmsgend:
+	.macro PUSHR regs:vararg
+	stmfd	RSP!, \regs
+	.endm
+
+	.macro POPR regs:vararg
+	ldmfd	RSP!, \regs
+	.endm
+
+	.macro PUSHP regs:vararg
+	push	\regs
+	.endm
+
+	.macro POPP regs:vararg
+	pop	\regs
+	.endm
 
 @ We get here only from NEXT, so T0 is guaranteed to be the WORD we
 @ are supposed to run. We need to skip the codeword at offset 0
@@ -180,14 +185,14 @@ _start:
 	@ initialize the return stack
 	ldr	RSP, =return_stack_top
 	@ initialize data segment (sets var_HERE FORTH variable)
-	bl	set_up_data_segment
+	bl	create_data_segment
 	@ initialize the interpreter with a "fake" cold_start WORD
 	ldr	NIP, =cold_start
 	NEXT
 
 @ Note that jonesforth.f has the code to grow the data segment on
 @ demand.
-set_up_data_segment:
+create_data_segment:
 	@ TODO: error checking? maybe?
 	mov	r0, #0
 	mov	r7, #__NR_brk
@@ -269,20 +274,20 @@ code_\label :
 
 	@ DROP (a -- )
 	defcode "DROP",4,,DROP
-	add PSP, PSP, #4	@ POPPSP would load uselessly
+	add	PSP, PSP, #4
 	NEXT
 
 	@ SWAP (a b -- b a)
-	defcode "SWAP",4,,SWAP	@ avoid POP/PUSH macros
-	ldr	T0, [PSP]	@ load from PSP
-	ldr	T1, [PSP, #4]	@ load from PSP+4
-	str	T0, [PSP, #4]	@ store to PSP+4
-	str	T1, [PSP]	@ store to PSP
+	defcode "SWAP",4,,SWAP
+	ldr	T0, [PSP]
+	ldr	T1, [PSP, #4]
+	str	T0, [PSP, #4]
+	str	T1, [PSP]
 	NEXT
 
 	@ DUP (a -- a a)
 	defcode "DUP",3,,DUP
-	ldr	T0, [PSP]	@ POPPSP would require two PUSHPSPs
+	ldr	T0, [PSP]
 	PUSHPSP	T0
 	NEXT
 
@@ -294,20 +299,16 @@ code_\label :
 
 	@ ROT (a b c -- b c a)
 	defcode "ROT",3,,ROT
-	POPPSP	T0		@ TODO: avoid unecessary PSP updates
-	POPPSP	T1
-	POPPSP	T2
-	PUSHPSP	T1
+	POPP	{T0, T1, T2}
+	PUSHPSP	T1		@ TODO: avoid unecessary PSP updates
 	PUSHPSP	T0
 	PUSHPSP	T2
 	NEXT
 
 	@ -ROT (a b c -- c a b)
 	defcode "-ROT",4,,NROT
-	POPPSP	T0		@ TODO: avoid unecessary PSP updates
-	POPPSP	T1
-	POPPSP	T2
-	PUSHPSP	T0
+	POPP	{T0, T1, T2}
+	PUSHPSP	T0		@ TODO: avoid unecessary PSP updates
 	PUSHPSP	T2
 	PUSHPSP	T1
 	NEXT
@@ -322,24 +323,20 @@ code_\label :
 
 	@ 2DROP (a b -- )
 	defcode "2DROP",5,,TWODROP
-	add	PSP, PSP, #8	@ POPPSP would load from memory
+	add	PSP, PSP, #8
 	NEXT
 
 	@ 2DUP (a b -- a b a b)
 	defcode "2DUP",4,,TWODUP
-	ldr	T0, [PSP]	@ POPPSP would require two PUSHPSPs
-	ldr	T1, [PSP, #4]	@ same
-	PUSHPSP	T1
-	PUSHPSP	T0
+	ldr	T0, [PSP]
+	ldr	T1, [PSP, #4]
+	PUSHP	{T0, T1}
 	NEXT
 
 	@ 2SWAP (a b c d -- c d a b)
 	defcode "2SWAP",5,,TWOSWAP
-	POPPSP	T0		@ TODO: avoid unecessary PSP updates
-	POPPSP	T1
-	POPPSP	T2
-	POPPSP	T3
-	PUSHPSP	T1
+	POPP	{T0, T1, T2, T3}
+	PUSHPSP	T1		@ TODO: avoid unecessary PSP updates
 	PUSHPSP	T0
 	PUSHPSP	T3
 	PUSHPSP	T2
@@ -348,33 +345,30 @@ code_\label :
 	@ ?DUP (0 -- 0)
 	@ ?DUP (a -- a a)
 	defcode "?DUP",4,,QDUP
-	ldr	T0, [PSP]	@ POPPSP would require PUSHPSP
-	cmp	T0, #0		@ != 0?
-	pushne	{T0}		@ PUSHPSP is not conditional
+	ldr	T0, [PSP]
+	cmp	T0, #0
+	pushne	{T0}		@ PUSH macro not conditional
 	NEXT
 
 	@ + (a b -- a+b)
 	defcode "+",1,,ADD
-	POPPSP	T0		@ TODO: avoid unecessary PSP updates
-	POPPSP	T1
+	POPP	{T0, T1}
 	add	T0, T1, T0
-	PUSHPSP	T0
+	PUSHP	{T0}
 	NEXT
 
 	@ - (a b -- a-b)
 	defcode "-",1,,SUB
-	POPPSP	T0		@ TODO: avoid unecessary PSP updates
-	POPPSP	T1
+	POPP	{T0, T1}
 	sub	T0, T1, T0
-	PUSHPSP	T0
+	PUSHP	{T0}
 	NEXT
 
 	@ * (a b -- a*b)
 	defcode "*",1,,MUL
-	POPPSP	T0		@ TODO: avoid unecessary PSP updates
-	POPPSP	T1
+	POPP	{T0, T1}
 	mul	T0, T1, T0
-	PUSHPSP	T0
+	PUSHP	{T0}
 	NEXT
 
 	@ /MOD (a b -- a%b a/b)
@@ -427,8 +421,7 @@ posmsgend:
 
 	@ = (a b -- a=b)
 	defcode "=",1,,EQU
-	POPPSP	T0
-	POPPSP	T1
+	POPP	{T0, T1}
 	cmp	T1, T0
 	moveq	T0, #1
 	movne	T0, #0
@@ -437,8 +430,7 @@ posmsgend:
 
 	@ <> (a b -- a<>b)
 	defcode "<>",2,,NEQU
-	POPPSP	T0
-	POPPSP	T1
+	POPP	{T0, T1}
 	cmp	T1, T0
 	movne	T0, #1
 	moveq	T0, #0
@@ -447,8 +439,7 @@ posmsgend:
 
 	@ < (a b -- a<b)
 	defcode "<",1,,LT
-	POPPSP	T0
-	POPPSP	T1
+	POPP	{T0, T1}
 	cmp	T1, T0
 	movlt	T0, #1
 	movge	T0, #0
@@ -457,8 +448,7 @@ posmsgend:
 
 	@ > (a b -- a>b)
 	defcode ">",1,,GT
-	POPPSP	T0
-	POPPSP	T1
+	POPP	{T0, T1}
 	cmp	T1, T0
 	movgt	T0, #1
 	movle	T0, #0
@@ -467,8 +457,7 @@ posmsgend:
 
 	@ <= (a b -- a<=b)
 	defcode "<=",2,,LE
-	POPPSP	T0
-	POPPSP	T1
+	POPP	{T0, T1}
 	cmp	T1, T0
 	movle	T0, #1
 	movgt	T0, #0
@@ -477,8 +466,7 @@ posmsgend:
 
 	@ >= (a b -- a>=b)
 	defcode ">=",2,,GE
-	POPPSP	T0
-	POPPSP	T1
+	POPP	{T0, T1}
 	cmp	T1, T0
 	movge	T0, #1
 	movlt	T0, #0
@@ -489,24 +477,21 @@ posmsgend:
 
 	@ AND (a b -- a&b)
 	defcode "AND",3,,AND
-	POPPSP	T0
-	POPPSP	T1
+	POPP	{T0, T1}
 	and	T0, T1, T0
 	PUSHPSP	T0
 	NEXT
 
 	@ OR (a b -- a|b)
 	defcode "OR",2,,OR
-	POPPSP	T0
-	POPPSP	T1
+	POPP	{T0, T1}
 	orr	T0, T1, T0
 	PUSHPSP	T0
 	NEXT
 
 	@ XOR (a b -- a^b)
 	defcode "XOR",3,,XOR
-	POPPSP	T0
-	POPPSP	T1
+	POPP	{T0, T1}
 	eor	T0, T1, T0
 	PUSHPSP	T0
 	NEXT
@@ -518,45 +503,48 @@ posmsgend:
 	str	T0, [PSP]
 	NEXT
 
-@ TODO: register names inconsistent from here on out
-
+@ TODO: test?
 	defcode "EXIT",4,,EXIT
 	POPRSP	NIP
 	NEXT
 
+@ TODO: test?
 	defcode "LIT",3,,LIT
 	ldr	T0, [NIP], #4	@ load WORD from NIP, increment NIP
 				@ which grabbed and skipped the literal
 	PUSHPSP	T0		@ push it
 	NEXT
 
+	@ ! (value address -- ) M[address] = value
 	defcode "!",1,,STORE
-	POPPSP	r0		@ address
-	POPPSP	r1		@ value
-	str	r1, [r0]	@ store
+	POPP	{T0, T1}
+	str	T1, [T0]
 	NEXT
 
+	@ @ (address -- value) value = M[address]
 	defcode "@",1,,FETCH
-	POPPSP	r0		@ address
-	ldr	r1, [r0]	@ load
-	PUSHPSP	r1
+	POPPSP	T0
+	ldr	T1, [T0]
+	PUSHPSP	T1
 	NEXT
 
+	@ +! (value address -- ) M[address] += value
 	defcode "+!",2,,ADDSTORE
-	POPPSP	r0		@ address
-	POPPSP	r1		@ amount to add
-	ldr	r2, [r0]
-	add	r2, r2, r1
-	str	r2, [r0]
+	POPP	{T0, T1}
+	ldr	T2, [T0]
+	add	T2, T2, T1
+	str	T2, [T0]
 	NEXT
 
+	@ -! (value address -- ) M[address] -= value
 	defcode "-!",2,,SUBSTORE
-	POPPSP	r0		@ address
-	POPPSP	r1		@ amount to subtract
-	ldr	r2, [r0]
-	sub	r2, r2, r1
-	str	r2, [r0]
+	POPP	{T0, T1}
+	ldr	T2, [T0]
+	sub	T2, T2, T1
+	str	T2, [T0]
 	NEXT
+
+@ TODO: register names inconsistent from here on out
 
 	defcode "C!",2,,STOREBYTE
 	POPPSP	r0		@ address
